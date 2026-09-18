@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Language Evolution Engine</title>
+<style>
+  :root{
+    --bg:#0d0b14; --bg2:#14111f; --panel:#1a1626; --panel2:#221c33;
+    --ink:#ece6da; --dim:#a89f8e; --faint:#6f6858;
+    --gold:#d9b46a; --gold2:#f0d79a; --rust:#c47a4a; --teal:#5fbfa8;
+    --violet:#9d8ad6; --rose:#d47a9a; --line:#332a45; --line2:#463a5e;
+    --ok:#7fc98a; --loan:#6fb4e0; --derived:#c9a0e6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(900px 600px at 12% -5%, #241c38 0%, transparent 55%),
+      radial-gradient(1000px 700px at 100% 0%, #1c2530 0%, transparent 50%),
+      var(--bg);
+    color:var(--ink);
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    font-size:15px; line-height:1.5; overflow-x:hidden;
+  }
+  .mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace}
+  .ipa{font-family:"Charis SIL","Doulos SIL","Gentium Plus","Segoe UI",serif; letter-spacing:.3px}
+  h1,h2,h3{font-weight:600;margin:0}
+  button{font-family:inherit;cursor:pointer}
+  a{color:var(--gold)}
+
+  /* ---------- Header ---------- */
+  header{
+    padding:16px 22px 14px; border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(30,24,46,.85),rgba(20,16,32,.4));
+    display:flex; flex-wrap:wrap; align-items:center; gap:18px 26px; backdrop-filter:blur(4px);
+  }
+  .brand{display:flex;align-items:baseline;gap:12px;flex:0 0 auto}
+  .brand .glyphmark{font-size:26px;color:var(--gold);text-shadow:0 0 22px rgba(217,180,106,.35)}
+  .brand h1{font-size:22px;letter-spacing:.4px;background:linear-gradient(90deg,var(--gold2),var(--gold),var(--rust));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .brand .sub{font-size:12.5px;color:var(--dim);font-style:italic}
+  .controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;flex:1 1 auto}
+  .ctrl{display:flex;align-items:center;gap:7px}
+  .ctrl label{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.7px}
+  input[type=text],select{
+    background:var(--panel2);border:1px solid var(--line2);color:var(--ink);
+    padding:7px 10px;border-radius:8px;font-family:inherit;font-size:14px;outline:none;transition:.15s;
+  }
+  input[type=text]{width:150px}
+  input[type=text]:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(217,180,106,.15)}
+  input[type=range]{accent-color:var(--gold);width:150px}
+  .btn{
+    background:linear-gradient(180deg,#3a2f52,#2a2240);border:1px solid var(--line2);
+    color:var(--gold2);padding:8px 16px;border-radius:8px;font-size:14px;font-weight:600;letter-spacing:.3px;transition:.15s;
+  }
+  .btn:hover{border-color:var(--gold);box-shadow:0 4px 18px rgba(0,0,0,.4);transform:translateY(-1px)}
+  .btn.primary{background:linear-gradient(180deg,var(--gold),var(--rust));color:#241704;border-color:var(--gold2)}
+  .btn.ghost{background:transparent;color:var(--dim);padding:6px 12px}
+  .btn.ghost:hover{color:var(--gold2);transform:none}
+  .yearOut{font-family:"SFMono-Regular",Consolas,monospace;color:var(--gold2);font-size:14px;min-width:78px;text-align:right}
+
+  /* ---------- Layout ---------- */
+  main{display:grid;grid-template-columns:400px 1fr;gap:0;height:calc(100vh - 74px)}
+  @media(max-width:1100px){main{grid-template-columns:1fr;height:auto}}
+  .left{border-right:1px solid var(--line);overflow-y:auto;padding:16px}
+  .right{overflow-y:auto;padding:18px 22px}
+  .card{background:linear-gradient(180deg,var(--panel),rgba(26,22,38,.6));border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:16px}
+  .card h2{font-size:15px;color:var(--gold2);letter-spacing:.5px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .card h2 .ic{color:var(--rust)}
+  .hint{font-size:12px;color:var(--faint);font-style:italic}
+
+  /* stats */
+  .statgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .stat{background:var(--panel2);border-radius:10px;padding:9px 11px;border:1px solid var(--line)}
+  .stat .n{font-size:20px;color:var(--gold2);font-family:"SFMono-Regular",monospace}
+  .stat .l{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.7px}
+
+  /* tree */
+  #treeWrap{width:100%;overflow-x:auto}
+  svg text{font-family:"Iowan Old Style",Georgia,serif}
+  .treeNode{cursor:pointer}
+  .treeNode:hover text{fill:var(--gold2)}
+  .langChip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:999px;padding:5px 12px;margin:3px;font-size:13px;cursor:pointer;transition:.15s}
+  .langChip:hover{border-color:var(--gold)}
+  .langChip.active{background:linear-gradient(180deg,var(--gold),var(--rust));color:#241704;border-color:var(--gold2);font-weight:600}
+  .langChip .dot{width:9px;height:9px;border-radius:50%}
+
+  /* tabs */
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:16px}
+  .tab{background:transparent;border:none;color:var(--dim);padding:9px 15px;font-size:14px;font-weight:600;letter-spacing:.3px;border-bottom:2px solid transparent;transition:.15s}
+  .tab:hover{color:var(--ink)}
+  .tab.active{color:var(--gold2);border-bottom-color:var(--gold)}
+
+  .selhdr{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+  .selhdr h2{font-size:24px;color:var(--gold2);letter-spacing:.4px}
+  .selhdr .meta{font-size:13px;color:var(--dim)}
+  .badge{display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:999px;letter-spacing:.5px;text-transform:uppercase;font-family:"SFMono-Regular",monospace;vertical-align:middle}
+  .badge.core{background:rgba(217,180,106,.16);color:var(--gold2)}
+  .badge.derived{background:rgba(201,160,230,.16);color:var(--derived)}
+  .badge.loan{background:rgba(111,180,224,.16);color:var(--loan)}
+
+  /* vocab table */
+  table{width:100%;border-collapse:collapse}
+  .vtable th{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--faint);text-align:left;padding:7px 10px;border-bottom:1px solid var(--line2)}
+  .vtable td{padding:8px 10px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:middle}
+  .vtable tr{cursor:pointer;transition:.12s}
+  .vtable tr:hover td{background:rgba(217,180,106,.06)}
+  .vtable .gloss{color:var(--dim)}
+  .vtable .form{font-size:17px;color:var(--gold2)}
+  .vtable .rom{color:var(--teal);font-style:italic}
+  .searchbar{display:flex;gap:8px;margin-bottom:12px}
+  .searchbar input{flex:1;width:auto}
+
+  /* etymology */
+  .etymHead{text-align:center;margin-bottom:22px}
+  .etymHead .modern{font-size:40px;color:var(--gold2);line-height:1.1}
+  .etymHead .rom{font-size:17px;color:var(--teal);font-style:italic;margin-top:2px}
+  .etymHead .g{font-size:13px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-top:6px}
+  .timeline{position:relative;margin:0 auto;max-width:640px;padding-left:0}
+  .tl-item{position:relative;display:grid;grid-template-columns:88px 1fr;gap:14px;padding:0 0 4px}
+  .tl-year{font-family:"SFMono-Regular",monospace;font-size:13px;color:var(--rust);text-align:right;padding-top:12px}
+  .tl-body{position:relative;border-left:2px solid var(--line2);padding:10px 0 18px 22px}
+  .tl-item:last-child .tl-body{border-left-color:transparent}
+  .tl-dot{position:absolute;left:-8px;top:14px;width:14px;height:14px;border-radius:50%;background:var(--gold);border:3px solid var(--bg);box-shadow:0 0 0 1px var(--gold)}
+  .tl-dot.root{background:var(--rust)}
+  .tl-dot.loan{background:var(--loan)}
+  .tl-dot.compound{background:var(--derived)}
+  .tl-form{font-size:24px;color:var(--gold2);display:inline-block}
+  .tl-form .arrow{color:var(--faint);font-size:16px;margin:0 8px}
+  .tl-lang{font-size:12px;color:var(--dim);font-style:italic;margin-left:10px}
+  .tl-note{font-size:13px;color:var(--dim);margin-top:3px}
+  .tl-note .rule{color:var(--teal)}
+  .cognates{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .cog{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:6px 11px;font-size:13px}
+  .cog .cn{font-size:11px;color:var(--faint);display:block}
+  .cog .cf{font-size:16px;color:var(--gold2)}
+
+  /* sound changes */
+  .epoch{margin-bottom:14px}
+  .epoch .ey{font-family:"SFMono-Regular",monospace;color:var(--rust);font-size:13px;border-bottom:1px dotted var(--line2);padding-bottom:3px;margin-bottom:6px}
+  .rulechip{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 11px;margin:3px;font-size:13px}
+  .rulechip .rn{color:var(--teal);font-weight:600}
+  .rulechip .rd{color:var(--dim);font-size:12px;margin-left:6px}
+
+  /* grammar */
+  .glog{list-style:none;padding:0;margin:0}
+  .glog li{display:grid;grid-template-columns:70px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+  .glog .gy{font-family:"SFMono-Regular",monospace;color:var(--rust);font-size:13px}
+  .gsum{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:16px}
+  .gsum .gi{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+  .gsum .gi .k{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.6px}
+  .gsum .gi .v{font-size:15px;color:var(--gold2)}
+
+  /* phonology */
+  .phchips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 14px}
+  .ph{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:34px;padding:0 8px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;font-size:17px;color:var(--ink)}
+  .ph.new{border-color:var(--ok);color:var(--ok);box-shadow:0 0 12px rgba(127,201,138,.2)}
+  .ph.lost{opacity:.4;text-decoration:line-through;color:var(--rust)}
+
+  /* writing */
+  .scriptrow{display:flex;gap:24px;flex-wrap:wrap;margin-top:8px}
+  .scriptstage{flex:1;min-width:200px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center}
+  .scriptstage .stype{font-size:12px;color:var(--rust);text-transform:uppercase;letter-spacing:.8px}
+  .scriptstage .syr{font-family:"SFMono-Regular",monospace;font-size:12px;color:var(--faint)}
+  .glyphword{display:flex;gap:6px;justify-content:center;margin:14px 0 8px;flex-wrap:wrap}
+  .glyph{width:44px;height:52px}
+  .glyph line{stroke:var(--gold2);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;fill:none}
+  .scriptstage .sform{font-size:16px;color:var(--gold2)}
+
+  .empty{color:var(--faint);font-style:italic;text-align:center;padding:40px 20px}
+  .flash{animation:fl 1.4s ease}
+  @keyframes fl{0%{background:rgba(217,180,106,.18)}100%{background:transparent}}
+  ::-webkit-scrollbar{width:11px;height:11px}
+  ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px;border:3px solid transparent;background-clip:padding-box}
+  ::-webkit-scrollbar-thumb:hover{background:var(--faint)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="glyphmark">&#5792;</span>
+    <div>
+      <h1>Language Evolution Engine</h1>
+      <div class="sub">from a single proto-tongue to a family of daughters across three millennia</div>
+    </div>
+  </div>
+  <div class="controls">
+    <div class="ctrl">
+      <label>Seed</label>
+      <input type="text" id="seed" value="anatha" spellcheck="false">
+    </div>
+    <div class="ctrl">
+      <label>Span</label>
+      <input type="range" id="spanRange" min="1500" max="5000" step="500" value="3000">
+      <span class="yearOut" id="spanOut">3000 yrs</span>
+    </div>
+    <button class="btn primary" id="genBtn">&#10022; Generate world</button>
+    <button class="btn ghost" id="randBtn">&#8635; Random seed</button>
+  </div>
+</header>
+
+<main>
+  <aside class="left">
+    <div class="card">
+      <h2><span class="ic">&#9733;</span> The world</h2>
+      <div class="statgrid" id="stats"></div>
+      <div class="hint" style="margin-top:8px" id="worldNote"></div>
+    </div>
+    <div class="card">
+      <h2><span class="ic">&#127795;</span> Family tree</h2>
+      <div id="treeWrap"></div>
+      <div class="hint" style="margin-top:6px">Click a leaf language to inspect it. Branch length &#8776; centuries of separation.</div>
+    </div>
+    <div class="card">
+      <h2><span class="ic">&#128172;</span> Living languages</h2>
+      <div id="langList"></div>
+    </div>
+    <div class="card">
+      <h2><span class="ic">&#127760;</span> Neighboring peoples</h2>
+      <div id="neighborList"></div>
+      <div class="hint" style="margin-top:6px">Sources of loanwords traded across borders.</div>
+    </div>
+  </aside>
+
+  <section class="right">
+    <div class="selhdr">
+      <div>
+        <h2 id="selName">&mdash;</h2>
+        <div class="meta" id="selMeta"></div>
+      </div>
+    </div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="vocab">Vocabulary</button>
+      <button class="tab" data-tab="etym">Etymology tracer</button>
+      <button class="tab" data-tab="sound">Sound changes</button>
+      <button class="tab" data-tab="grammar">Grammar</button>
+      <button class="tab" data-tab="writing">Writing system</button>
+      <button class="tab" data-tab="phon">Phonology</button>
+    </div>
+    <div id="panel"></div>
+  </section>
+</main>
+
+<script>
+/* ============================================================
+   Language Evolution Engine  —  deterministic, seed-driven
+   ============================================================ */
+
+/* ---------- deterministic RNG ---------- */
+function hashStr(str){let h=2166136261>>>0;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function makeRng(seed){
+  let s=seed>>>0;
+  const f=()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};
+  return{
+    next:f,
+    int:n=>Math.floor(f()*n),
+    range:(a,b)=>a+Math.floor(f()*(b-a+1)),
+    pick:a=>a[Math.floor(f()*a.length)],
+    chance:p=>f()<p,
+    shuffle:a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(f()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;},
+    sample(a,k){return this.shuffle(a).slice(0,k);}
+  };
+}
+
+/* ---------- phoneme system ---------- */
+const CATS={
+  V:'aeiouəyæɑɔɛ',
+  C:'pbtdkgmnŋfvθðszšžxɣhlrwjčǰ',
+  F:'ieyæɛ',
+  B:'uoɑɔ',
+  N:'mnŋ',
+  P:'pbtdkg'
+};
+const ROMAN={'š':'sh','ž':'zh','č':'ch','ǰ':'j','ŋ':'ng','θ':'th','ð':'dh','ɣ':'gh','x':'kh','ə':'e','æ':'a','ɑ':'a','ɔ':'o','ɛ':'e','j':'y'};
+function roman(s){return ROMAN[s]||s;}
+function romanize(segs){return segs.map(roman).join('');}
+function ipa(segs){return segs.join('');}
+function cap(s){return s.charAt(0).toUpperCase()+s.slice(1);}
+
+const ALL_C=['p','b','t','d','k','g','m','n','ŋ','f','v','θ','ð','s','z','š','ž','x','ɣ','h','l','r','w','j','č','ǰ'];
+const CORE_C=['t','k','m','n','s','p','l','r'];
+const ALL_V=['a','e','i','o','u','ə','y','æ'];
+
+/* ---------- sound-change rules ---------- */
+function parseCtx(ctx){
+  const r={pre:null,preB:false,post:null,postB:false};
+  if(!ctx)return r;
+  const parts=ctx.split('_');const l=parts[0],rt=parts[1]||'';
+  if(l==='#')r.preB=true;else if(l)r.pre=l;
+  if(rt==='#')r.postB=true;else if(rt)r.post=rt;
+  return r;
+}
+function segMatch(seg,tok){if(seg===undefined)return false;if(CATS[tok])return CATS[tok].indexOf(seg)>=0;return seg===tok;}
+function ctxOk(segs,i,c){
+  if(c.preB&&i!==0)return false;
+  if(c.pre!=null&&(i===0||!segMatch(segs[i-1],c.pre)))return false;
+  if(c.postB&&i!==segs.length-1)return false;
+  if(c.post!=null&&(i===segs.length-1||!segMatch(segs[i+1],c.post)))return false;
+  return true;
+}
+function applyRule(segs,rule){
+  const fromSet=CATS[rule.from]?CATS[rule.from]:rule.from;
+  const c=rule._ctx;let changed=false;const out=[];
+  for(let i=0;i<segs.length;i++){
+    const s=segs[i];
+    if(fromSet.indexOf(s)>=0&&ctxOk(segs,i,c)){
+      let rep;
+      if(typeof rule.to==='object')rep=rule.to[s]!==undefined?rule.to[s]:s;
+      else rep=rule.to;
+      if(rep===''){ if(segs.length<=(rule.guard||1)){out.push(s);continue;} changed=true; continue; }
+      if(rep!==s)changed=true;
+      for(const ch of rep)out.push(ch);
+    } else out.push(s);
+  }
+  return{segs:out,changed};
+}
+const RULE_POOL=[
+  {name:'Palatalization',from:'k',to:'č',ctx:'_F',desc:'k → tʃ before front vowels'},
+  {name:'Palatalization',from:'g',to:'ǰ',ctx:'_F',desc:'g → dʒ before front vowels'},
+  {name:'Lenition',from:'ptk',to:{p:'b',t:'d',k:'g'},ctx:'V_V',desc:'voiceless stops voice between vowels'},
+  {name:'Spirantization',from:'bdg',to:{b:'v',d:'ð',g:'ɣ'},ctx:'V_V',desc:'voiced stops become fricatives between vowels'},
+  {name:'Final devoicing',from:'bdg',to:{b:'p',d:'t',g:'k'},ctx:'_#',desc:'voiced stops devoice word-finally'},
+  {name:'Rhotacism',from:'z',to:'r',ctx:'V_V',desc:'z → r between vowels'},
+  {name:'Debuccalization',from:'s',to:'h',ctx:'V_V',desc:'s → h between vowels'},
+  {name:'H-loss',from:'h',to:'',ctx:'',desc:'h is lost everywhere'},
+  {name:'Apocope',from:'V',to:'',ctx:'C_#',guard:2,desc:'final short vowels drop after consonants'},
+  {name:'Final raising',from:'e',to:'i',ctx:'_#',desc:'final e → i'},
+  {name:'Final raising',from:'o',to:'u',ctx:'_#',desc:'final o → u'},
+  {name:'Reduction',from:'ao',to:'ə',ctx:'C_#',desc:'final vowels reduce to schwa'},
+  {name:'W-fortition',from:'w',to:'v',ctx:'',desc:'w → v'},
+  {name:'Th-stopping',from:'θ',to:'t',ctx:'',desc:'θ → t'},
+  {name:'Dh-loss',from:'ð',to:'',ctx:'V_V',guard:2,desc:'ð lost between vowels'},
+  {name:'Velar softening',from:'x',to:'h',ctx:'',desc:'x → h'},
+  {name:'Gh-vocalization',from:'ɣ',to:'w',ctx:'V_V',desc:'ɣ → w between vowels'},
+  {name:'Affrication',from:'t',to:'č',ctx:'_i',desc:'t → tʃ before i'},
+  {name:'Deaffrication',from:'č',to:'š',ctx:'',desc:'tʃ → ʃ'},
+  {name:'Diphthongization',from:'i',to:'əi',ctx:'C_#',desc:'stressed i → əi finally'},
+  {name:'Diphthongization',from:'u',to:'əu',ctx:'C_#',desc:'stressed u → əu finally'},
+  {name:'A-backing',from:'a',to:'ɑ',ctx:'',desc:'a → ɑ'},
+  {name:'I-umlaut',from:'u',to:'y',ctx:'_F',desc:'u → y before front vowels'},
+  {name:'L-vocalization',from:'l',to:'w',ctx:'_#',desc:'final l → w'},
+  {name:'Nasal loss',from:'N',to:'',ctx:'V_#',guard:2,desc:'final nasal lost after vowel'},
+  {name:'V-fronting',from:'o',to:'e',ctx:'_F',desc:'o → e before front vowels'},
+  {name:'B-lenition',from:'b',to:'v',ctx:'V_V',desc:'b → v between vowels'},
+  {name:'Cluster voicing',from:'p',to:'b',ctx:'N_',desc:'p → b after a nasal'}
+];
+RULE_POOL.forEach(r=>r._ctx=parseCtx(r.ctx));
+
+/* ---------- proto inventory & word gen ---------- */
+function makeInventory(rng){
+  let cons=CORE_C.slice();
+  const extras=rng.shuffle(ALL_C.filter(c=>CORE_C.indexOf(c)<0)).slice(0,rng.range(5,9));
+  cons=cons.concat(extras);
+  let vow=['a','i','u'];
+  if(rng.chance(0.8))vow.push('e');
+  if(rng.chance(0.8))vow.push('o');
+  if(rng.chance(0.3))vow.push('æ');
+  const structure=rng.pick(['(C)V(C)','(C)V(C)','CV(C)','(C)V']);
+  return{consonants:cons,vowels:vow,structure};
+}
+function genRoot(rng,inv){
+  const nsyl=rng.chance(0.55)?1:2;
+  const segs=[];
+  const allowCoda=inv.structure.indexOf('(C)')>0||inv.structure.indexOf('V(C)')>0;
+  for(let s=0;s<nsyl;s++){
+    if(s===0?rng.chance(0.85):rng.chance(0.75))segs.push(rng.pick(inv.consonants));
+    segs.push(rng.pick(inv.vowels));
+    if(allowCoda&&rng.chance(s===nsyl-1?0.42:0.28))segs.push(rng.pick(inv.consonants));
+  }
+  if(segs.length===0)segs.push(rng.pick(inv.vowels));
+  return segs;
+}
+function nameWord(rng,inv){
+  const n=rng.range(2,3);let s='';
+  for(let i=0;i<n;i++){
+    if(i===0||rng.chance(0.8))s+=roman(rng.pick(inv.consonants));
+    s+=roman(rng.pick(inv.vowels));
+    if(rng.chance(0.22))s+=roman(rng.pick(inv.consonants));
+  }
+  return s.replace(/[^a-z]/g,'')||'ka';
+}
+
+/* ---------- concepts, compounds, loans ---------- */
+const CONCEPTS=['water','fire','sun','moon','star','sky','earth','stone','tree','mountain','river','sea','wind','rain','snow','day','night','man','woman','child','mother','father','hand','eye','heart','blood','bone','head','foot','mouth','tooth','bird','fish','dog','wolf','horse','snake','big','small','good','bad','hot','cold','new','old','one','two','three','eat','drink','sleep','see','hear','know','speak','go','come','give','die','live','love','king','god','house','road','name','I','you'];
+const COMPOUNDS=[['sun','stone','gold'],['water','stone','crystal'],['fire','mountain','volcano'],['sky','fire','lightning'],['big','water','ocean'],['small','river','brook'],['night','eye','dream'],['god','house','temple'],['king','house','palace'],['road','stone','bridge'],['blood','water','wine'],['fire','water','steam'],['cold','water','ice'],['hot','stone','ember'],['bird','man','angel'],['horse','road','journey'],['speak','house','court'],['see','stone','mirror'],['know','man','sage'],['star','road','fate'],['eye','water','tear'],['heart','fire','passion'],['old','man','elder'],['big','house','hall'],['sun','eye','glory']];
+const LOAN_GLOSSES=['silver','iron','silk','sugar','paper','glass','copper','salt','honey','spice','gem','bronze','tea','ink','wax'];
+const NEAR={'θ':'t','ð':'d','ŋ':'n','x':'k','ɣ':'g','š':'s','ž':'z','č':'t','ǰ':'d','y':'i','æ':'a','ɑ':'a','ɔ':'o','ɛ':'e','ə':'e'};
+function adapt(segs,inv){
+  const set=inv.consonants.concat(inv.vowels);
+  return segs.map(s=>{
+    if(set.indexOf(s)>=0)return s;
+    let m=NEAR[s]||s;
+    if(set.indexOf(m)<0)m=CATS.V.indexOf(s)>=0?rng2vowel(inv):'t';
+    return set.indexOf(m)>=0?m:(inv.vowels[0]);
+  });
+}
+function rng2vowel(inv){return inv.vowels[0];}
+
+/* ---------- glyphs (procedural runes) ---------- */
+function baseGlyph(rng){
+  const strokes=[];const n=rng.range(2,4);
+  for(let i=0;i<n;i++){
+    const len=rng.range(2,3);const pts=[];
+    let x=rng.range(0,3),y=rng.range(0,3);pts.push([x,y]);
+    for(let j=1;j<len;j++){
+      x=Math.max(0,Math.min(3,x+rng.pick([-1,0,1,1,2])));
+      y=Math.max(0,Math.min(3,y+rng.pick([-1,0,1,1,2])));
+      pts.push([x,y]);
+    }
+    strokes.push(pts);
+  }
+  return strokes;
+}
+function driftGlyph(g,rng,simplify){
+  let s=g.map(st=>st.map(p=>[
+    Math.max(-.4,Math.min(3.4,p[0]+rng.pick([-.4,0,0,.4]))),
+    Math.max(-.4,Math.min(3.4,p[1]+rng.pick([-.4,0,0,.4])))
+  ]));
+  if(simplify&&s.length>1&&rng.chance(0.35))s.splice(rng.int(s.length),1);
+  return s;
+}
+function glyphSVG(strokes){
+  let lines='';
+  strokes.forEach(st=>{
+    for(let i=0;i<st.length-1;i++){
+      const a=st[i],b=st[i+1];
+      lines+=`<line x1="${(a[0]*11+6).toFixed(1)}" y1="${(a[1]*13+8).toFixed(1)}" x2="${(b[0]*11+6).toFixed(1)}" y2="${(b[1]*13+8).toFixed(1)}"/>`;
+    }
+  });
+  return`<svg class="glyph" viewBox="0 0 44 52">${lines}</svg>`;
+}
+function writingType(year,span){
+  const inv=span*0.25;
+  if(year<inv)return{t:'Oral tradition',d:'no writing yet'};
+  const f=(year-inv)/(span-inv);
+  if(f<0.28)return{t:'Pictographic',d:'pictures of things'};
+  if(f<0.52)return{t:'Logographic',d:'signs for words'};
+  if(f<0.76)return{t:'Syllabary',d:'signs for syllables'};
+  return{t:'Alphabetic',d:'signs for sounds'};
+}
+
+/* ---------- grammar ---------- */
+function initGrammar(rng){
+  return{
+    order:rng.pick(['SOV','SOV','SVO','VSO']),
+    cases:rng.range(5,8),
+    genders:rng.pick([0,2,2,3]),
+    tense:rng.pick(['suffixes','tone','particles']),
+    articles:false,
+    alignment:rng.pick(['nominative–accusative','nominative–accusative','ergative–absolutive']),
+    hasFuture:false
+  };
+}
+const CASE_NAMES=['','nominative','accusative','genitive','dative','ablative','locative','instrumental','vocative'];
+function grammarSummary(g){
+  return[
+    ['Word order',g.order],
+    ['Cases',g.cases],
+    ['Grammatical gender',g.genders===0?'none':g.genders+' genders'],
+    ['Alignment',g.alignment],
+    ['Tense marking',g.tense],
+    ['Articles',g.articles?'yes':'none'],
+    ['Future tense',g.hasFuture?'grammaticalized':'periphrastic']
+  ];
+}
+function evolveGrammar(g,log,year,rng,lang){
+  let did=false;
+  if(g.cases>2&&rng.chance(0.55)){
+    const lost=CASE_NAMES[g.cases]||'oblique';g.cases--;
+    log.push({year,text:`The ${lost} case erodes and merges into neighbors, leaving ${g.cases} cases.`});did=true;
+  }
+  if(!g.articles&&g.cases<=4&&rng.chance(0.4)){
+    g.articles=true;log.push({year,text:`A definite article grammaticalizes from the demonstrative "that".`});did=true;
+  }
+  if(g.genders>2&&rng.chance(0.3)){
+    g.genders--;log.push({year,text:`The neuter gender collapses; now ${g.genders} genders remain.`});did=true;
+  } else if(g.genders===2&&rng.chance(0.15)){
+    g.genders=0;log.push({year,text:`Grammatical gender is lost entirely.`});did=true;
+  }
+  if(!g.hasFuture&&rng.chance(0.28)){
+    g.hasFuture=true;log.push({year,text:`A future tense grammaticalizes from the verb "to go".`});did=true;
+  }
+  if(rng.chance(0.12)){
+    const opts=['SOV','SVO','VSO'].filter(o=>o!==g.order);
+    const nw=rng.pick(opts);log.push({year,text:`Basic word order drifts from ${g.order} to ${nw}.`});g.order=nw;did=true;
+  }
+  if(!did&&rng.chance(0.5)){
+    const flav=rng.pick([
+      'Vowel harmony spreads across suffix boundaries.',
+      'A distinct plural suffix fuses onto nouns.',
+      'Postpositions begin to replace inflectional endings.',
+      'Verb agreement markers cliticize to the stem.',
+      'An evidential particle marks hearsay reports.'
+    ]);
+    log.push({year,text:flav});
+  }
+}
+
+/* ---------- world build ---------- */
+let idc=0;
+function makeNeighbor(seedStr,idx){
+  const rng=makeRng(hashStr(seedStr+':neighbor:'+idx));
+  const inv=makeInventory(rng);
+  const name=cap(nameWord(rng,inv))+(['ian','ic','ish','ara'][idx%4]);
+  const words={};
+  LOAN_GLOSSES.forEach(g=>words[g]=genRoot(rng,inv));
+  return{name,inv,words,color:idx%2?'var(--rose)':'var(--teal)'};
+}
+function protoEntry(segs,year,lang,note,kind){
+  return{segs,hist:[{year,lang,form:ipa(segs),note,kind:kind||'root'}]};
+}
+function evolveEntry(parent,rules,year,lang){
+  let segs=parent.segs.slice();const hist=parent.hist.slice();
+  for(const rule of rules){
+    const r=applyRule(segs,rule);
+    if(r.changed){hist.push({year,lang,form:ipa(r.segs),note:rule.desc,kind:'sound',rule:rule.name});segs=r.segs;}
+  }
+  return{segs,hist};
+}
+const REGION=['North','High','Old','Coastal','River','Low','Far','Inner','Wester','Easter'];
+function buildWorld(seedStr,span){
+  idc=0;
+  const H=hashStr(seedStr);
+  const rrng=makeRng(H);
+  const inv=makeInventory(rrng);
+  const step=Math.round(span/10);
+  const protoName='Proto-'+cap(nameWord(rrng,inv))+rrng.pick(['ic','an','ish']);
+  const used=new Set();
+  const words={};
+  for(const c of CONCEPTS){
+    let w,t=0;do{w=genRoot(rrng,inv);t++;}while(used.has(w.join(''))&&t<25);
+    used.add(w.join(''));
+    words[c]=protoEntry(w,0,protoName,'proto-root');
+  }
+  const glyphs={};const grng=makeRng(H^0x9e3779b9);
+  inv.consonants.concat(inv.vowels).forEach(ph=>glyphs[ph]=baseGlyph(makeRng(hashStr('gl'+ph+seedStr))));
+  const grammar=initGrammar(rrng);
+  const meta={};
+  const root={id:idc++,parent:null,year:0,name:protoName,lineageName:protoName,rules:[],words,grammar,
+    grammarLog:[{year:0,text:'The proto-language is first attested, spoken by a single people.'}],
+    glyphs,derivedLog:[],loanLog:[],inv,isRoot:true,childrenCount:0,isSplit:false,color:'var(--gold)'};
+  const allNodes=[root];
+  const neighbors=[makeNeighbor(seedStr,1),makeNeighbor(seedStr,2)];
+  const maxLineages=6;
+  let living=[root];
+  const epochs=Math.round(span/step);
+  const palette=['var(--gold)','var(--teal)','var(--violet)','var(--rose)','var(--rust)','var(--loan)'];
+  let leafColorIdx=0;
+  for(let e=1;e<=epochs;e++){
+    const year=e*step;
+    let leafCount=living.length;
+    const next=[];
+    for(const head of living){
+      const erng=makeRng(hashStr(seedStr+':'+head.id+':'+e));
+      let nCh=1;
+      if(leafCount<maxLineages&&e>=2&&e<epochs&&erng.chance(0.4)){nCh=2;leafCount++;}
+      for(let k=0;k<nCh;k++){
+        const crng=makeRng(hashStr(seedStr+':'+head.id+':'+e+':'+k));
+        const rules=crng.sample(RULE_POOL,crng.range(2,3));
+        const isSplit=nCh>1;
+        let lname=head.lineageName;
+        if(isSplit)lname=cap(crng.pick(REGION))+' '+cap(nameWord(crng,head.inv))+crng.pick(['ic','an','ese','ish']);
+        const nwords={};
+        for(const c in head.words)nwords[c]=evolveEntry(head.words[c],rules,year,lname);
+        const grammar2=Object.assign({},head.grammar);
+        const glog=head.grammarLog.slice();
+        if(e>=1)evolveGrammar(grammar2,glog,year,crng,lname);
+        const glyphs2={};for(const ph in head.glyphs)glyphs2[ph]=driftGlyph(head.glyphs[ph],crng,year>span*0.55);
+        const derivedLog=head.derivedLog.slice(),loanLog=head.loanLog.slice();
+        // compound growth
+        if(crng.chance(0.7)){
+          const done=new Set(derivedLog.map(d=>d.gloss));
+          const avail=COMPOUNDS.filter(r=>!done.has(r[2])&&nwords[r[0]]&&nwords[r[1]]);
+          if(avail.length){
+            const r=crng.pick(avail);const key='d:'+r[2];
+            let cs=nwords[r[0]].segs.concat(nwords[r[1]].segs);
+            if(cs.length>5)cs=cs.slice(0,5);
+            nwords[key]=protoEntry(cs,year,lname,'compound of "'+r[0]+'" + "'+r[1]+'"','compound');
+            meta[key]={type:'derived',gloss:r[2],from:r[0]+'+'+r[1]};
+            derivedLog.push({year,gloss:r[2],from:r[0]+'+'+r[1]});
+          }
+        }
+        // borrowing
+        if(e>=2&&crng.chance(0.5)){
+          const done=new Set(loanLog.map(l=>l.gloss));
+          const avail=LOAN_GLOSSES.filter(g=>!done.has(g));
+          if(avail.length){
+            const g=crng.pick(avail);const nb=crng.pick(neighbors);
+            const src=nb.words[g];const ad=adapt(src.slice(),head.inv);
+            const key='l:'+g;
+            nwords[key]=protoEntry(ad,year,lname,'borrowed from '+nb.name+' “'+ipa(src)+'”','loan');
+            meta[key]={type:'loan',gloss:g,src:nb.name,srcForm:ipa(src)};
+            loanLog.push({year,gloss:g,src:nb.name});
+          }
+        }
+        const node={id:idc++,parent:head,year,name:lname,lineageName:lname,rules,words:nwords,grammar:grammar2,
+          grammarLog:glog,glyphs:glyphs2,derivedLog,loanLog,inv:head.inv,isSplit,childrenCount:0,color:head.color};
+        head.childrenCount++;
+        allNodes.push(node);next.push(node);
+      }
+    }
+    living=next;
+  }
+  // finalize leaves
+  living.forEach(l=>{
+    l.isLeaf=true;
+    l.color=palette[leafColorIdx++%palette.length];
+    if(/^Proto-/.test(l.name))l.name=l.lineageName='Modern '+cap(nameWord(makeRng(l.id*2654435761),l.inv))+'ish';
+  });
+  // meta for core & self-referential concepts
+  CONCEPTS.forEach(c=>meta[c]={type:'core',gloss:c});
+  const familyName='The '+protoName.replace('Proto-','')+' family';
+  return{root,allNodes,leaves:living,neighbors,seedStr,span,step,inv,protoName,meta,familyName};
+}
+
+/* ---------- display tree ---------- */
+function pathOf(node){const p=[];let n=node;while(n){p.unshift(n);n=n.parent;}return p;}
+function buildDisplayTree(model){
+  const inc=new Set([model.root.id]);
+  model.leaves.forEach(l=>inc.add(l.id));
+  model.allNodes.forEach(n=>{if(n.isSplit)inc.add(n.id);});
+  function ancestor(n){let p=n.parent;while(p&&!inc.has(p.id))p=p.parent;return p;}
+  const dn=model.allNodes.filter(n=>inc.has(n.id)).map(n=>({node:n,parent:ancestor(n)}));
+  const byId={};dn.forEach(d=>{d.children=[];byId[d.node.id]=d;});
+  dn.forEach(d=>{if(d.parent&&byId[d.parent.id])byId[d.parent.id].children.push(d);});
+  let yc=0;
+  (function assign(d){if(!d)return;if(d.children.length===0){d.y=yc++;}else{d.children.forEach(assign);d.y=(d.children[0].y+d.children[d.children.length-1].y)/2;}})(byId[model.root.id]);
+  return{dn,byId,leafN:model.leaves.length};
+}
+function renderTree(model){
+  const{dn,byId,leafN}=buildDisplayTree(model);
+  const W=360,rowH=44,padT=14,padL=20,padR=100;
+  const H=Math.max(120,padT*2+leafN*rowH);
+  const innerW=W-padL-padR;
+  const xOf=n=>padL+(n.year/model.span)*innerW;
+  const yOf=d=>padT+d.y*rowH+rowH/2;
+  let edges='',nodes='';
+  dn.forEach(d=>{
+    if(d.parent&&byId[d.parent.id]){
+      const p=byId[d.parent.id];
+      const x1=xOf(p.node),y1=yOf(p),x2=xOf(d.node),y2=yOf(d);
+      const col=d.node.color||'var(--line2)';
+      edges+=`<path d="M${x1} ${y1} L${x1} ${y2} L${x2} ${y2}" fill="none" stroke="${col}" stroke-width="2" opacity="0.75"/>`;
+    }
+  });
+  dn.forEach(d=>{
+    const x=xOf(d.node),y=yOf(d);const n=d.node;
+    const isLeaf=n.isLeaf;const col=n.color||'var(--gold)';
+    const sel=state.sel&&state.sel.id===n.id;
+    nodes+=`<g class="treeNode" data-id="${n.id}">`;
+    nodes+=`<circle cx="${x}" cy="${y}" r="${isLeaf?6:4}" fill="${sel?'var(--gold2)':col}" stroke="${sel?'var(--gold2)':'var(--bg)'}" stroke-width="1.5"/>`;
+    if(isLeaf){
+      nodes+=`<text x="${x+11}" y="${y+4}" font-size="12.5" fill="${sel?'var(--gold2)':'var(--ink)'}">${esc(n.name)}</text>`;
+    } else if(n.isRoot){
+      nodes+=`<text x="${x-4}" y="${y-9}" font-size="11.5" fill="var(--dim)" text-anchor="middle" font-style="italic">${esc(n.name)}</text>`;
+    } else if(n.isSplit){
+      nodes+=`<text x="${x}" y="${y-9}" font-size="10.5" fill="var(--faint)" text-anchor="middle">&#9660;</text>`;
+    }
+    nodes+=`</g>`;
+  });
+  // time axis
+  let axis='';
+  for(let yr=0;yr<=model.span;yr+=model.step*2){
+    const x=padL+(yr/model.span)*innerW;
+    axis+=`<line x1="${x}" y1="${padT-6}" x2="${x}" y2="${H-6}" stroke="var(--line)" stroke-width="1" opacity="0.5"/>`;
+    axis+=`<text x="${x}" y="${H-1}" font-size="9.5" fill="var(--faint)" text-anchor="middle" font-family="monospace">${yr===0?'0':'+'+yr}</text>`;
+  }
+  return`<svg viewBox="0 0 ${W} ${H+8}" width="${W}" height="${H+8}">${axis}${edges}${nodes}</svg>`;
+}
+
+/* ---------- helpers ---------- */
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function glossOf(model,key){const m=model.meta[key];return m?m.gloss:key;}
+function invOfWords(node){
+  const set=new Set();
+  for(const c in node.words)node.words[c].segs.forEach(s=>set.add(s));
+  return set;
+}
+
+/* ============================================================
+   STATE + RENDER
+   ============================================================ */
+const state={model:null,sel:null,tab:'vocab',etymKey:null};
+
+function generate(){
+  const seed=document.getElementById('seed').value.trim()||'seed';
+  const span=+document.getElementById('spanRange').value;
+  state.model=buildWorld(seed,span);
+  state.sel=state.model.leaves[0];
+  state.etymKey='sun';
+  renderAll();
+}
+function selectLang(node){state.sel=node;state.etymKey=state.etymKey||'sun';renderAll();}
+function setTab(t){state.tab=t;renderAll();}
+
+function renderAll(){
+  const m=state.model;if(!m)return;
+  // stats
+  const totalWords=Object.keys(state.sel.words).length;
+  const stats=[
+    ['Time span',m.span+' yr'],
+    ['Languages',m.leaves.length],
+    ['Proto phonemes',m.inv.consonants.length+m.inv.vowels.length],
+    ['Sound rules',RULE_POOL.length]
+  ];
+  document.getElementById('stats').innerHTML=stats.map(s=>`<div class="stat"><div class="n">${s[1]}</div><div class="l">${s[0]}</div></div>`).join('');
+  document.getElementById('worldNote').textContent=m.familyName+', descended from '+m.protoName+'.';
+  // tree
+  document.getElementById('treeWrap').innerHTML=renderTree(m);
+  document.querySelectorAll('.treeNode').forEach(g=>{
+    g.addEventListener('click',()=>{
+      const id=+g.dataset.id;const node=m.allNodes.find(n=>n.id===id);
+      if(node&&node.isLeaf)selectLang(node);
+      else if(node){const leaf=m.leaves.find(l=>pathOf(l).indexOf(node)>=0);if(leaf)selectLang(leaf);}
+    });
+  });
+  // lang list
+  document.getElementById('langList').innerHTML=m.leaves.map(l=>
+    `<span class="langChip ${state.sel.id===l.id?'active':''}" data-id="${l.id}"><span class="dot" style="background:${l.color}"></span>${esc(l.name)}</span>`
+  ).join('');
+  document.querySelectorAll('#langList .langChip').forEach(c=>c.addEventListener('click',()=>{
+    selectLang(m.leaves.find(l=>l.id===+c.dataset.id));
+  }));
+  // neighbors
+  document.getElementById('neighborList').innerHTML=m.neighbors.map(nb=>
+    `<span class="langChip" style="cursor:default"><span class="dot" style="background:${nb.color}"></span>${esc(nb.name)}</span>`
+  ).join('');
+  // header
+  const sel=state.sel;
+  document.getElementById('selName').textContent=sel.name;
+  const wt=writingType(m.span,m.span);
+  document.getElementById('selMeta').innerHTML=
+    `spoken at year +${m.span} &nbsp;&middot;&nbsp; ${Object.keys(sel.words).length} words &nbsp;&middot;&nbsp; ${sel.grammar.order}, ${sel.grammar.cases} cases &nbsp;&middot;&nbsp; ${wt.t} script`;
+  // tabs
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===state.tab));
+  document.getElementById('panel').innerHTML=renderPanel();
+  wirePanel();
+}
+
+function renderPanel(){
+  switch(state.tab){
+    case'vocab':return renderVocab();
+    case'etym':return renderEtym();
+    case'sound':return renderSound();
+    case'grammar':return renderGrammar();
+    case'writing':return renderWriting();
+    case'phon':return renderPhon();
+  }
+}
+
+/* ---- vocabulary ---- */
+function renderVocab(){
+  const m=state.model,sel=state.sel;
+  let rows='';
+  const keys=Object.keys(sel.words);
+  const core=CONCEPTS.filter(c=>sel.words[c]);
+  const derived=keys.filter(k=>k.indexOf('d:')===0);
+  const loans=keys.filter(k=>k.indexOf('l:')===0);
+  function row(key){
+    const e=sel.words[key];const g=glossOf(m,key);const meta=m.meta[key];
+    const badge=meta.type;
+    return`<tr data-key="${esc(key)}"><td class="gloss">${esc(g)} <span class="badge ${badge}">${badge}</span></td>`+
+      `<td class="form ipa">${esc(ipa(e.segs))}</td><td class="rom">${esc(romanize(e.segs))}</td>`+
+      `<td style="color:var(--faint);font-size:12px">${e.hist.length} stage${e.hist.length>1?'s':''}</td></tr>`;
+  }
+  rows=core.map(row).join('')+derived.map(row).join('')+loans.map(row).join('');
+  return`
+  <div class="searchbar">
+    <input type="text" id="vsearch" placeholder="Search a word or gloss… (e.g. sun, water, temple)" spellcheck="false">
+    <button class="btn ghost" id="vsearchBtn">Trace &#8594;</button>
+  </div>
+  <div class="hint" style="margin-bottom:10px">Click any word to trace it back to its proto-origin. <span class="badge core">core</span> inherited &middot; <span class="badge derived">derived</span> coined &middot; <span class="badge loan">loan</span> borrowed.</div>
+  <table class="vtable"><thead><tr><th>Meaning</th><th>Modern form</th><th>Romanized</th><th></th></tr></thead>
+  <tbody>${rows}</tbody></table>`;
+}
+
+/* ---- etymology tracer ---- */
+function renderEtym(){
+  const m=state.model,sel=state.sel;
+  let key=state.etymKey;
+  if(!sel.words[key]){key=Object.keys(sel.words)[0];state.etymKey=key;}
+  const e=sel.words[key];const g=glossOf(m,key);
+  // dedupe consecutive identical forms in history for clarity
+  const hist=e.hist;
+  let items='';
+  hist.forEach((h,i)=>{
+    const prev=i>0?hist[i-1]:null;
+    let dotClass=h.kind==='root'?'root':h.kind==='loan'?'loan':h.kind==='compound'?'compound':'';
+    let formHtml=`<span class="tl-form ipa">${esc(h.form)}</span>`;
+    if(prev&&h.kind==='sound'){
+      formHtml=`<span class="tl-form ipa" style="color:var(--faint)">${esc(prev.form)}</span><span class="arrow">&#10230;</span>`+formHtml;
+    }
+    let note='';
+    if(h.kind==='root')note=`Attested proto-root in ${esc(h.lang)}.`;
+    else if(h.kind==='loan')note=esc(h.note)+'.';
+    else if(h.kind==='compound')note=esc(h.note)+'.';
+    else note=`<span class="rule">${esc(h.rule||'sound shift')}:</span> ${esc(h.note)}.`;
+    items+=`<div class="tl-item">
+      <div class="tl-year">${h.year===0?'year 0':'+'+h.year}</div>
+      <div class="tl-body"><span class="tl-dot ${dotClass}"></span>
+        ${formHtml}<span class="tl-lang">${esc(h.lang)}</span>
+        <div class="tl-note">${note}</div>
+      </div></div>`;
+  });
+  // cognates across sister languages
+  let cogs='';
+  m.leaves.forEach(l=>{
+    if(l.words[key]){
+      const sameGloss=l.words[key];
+      cogs+=`<div class="cog" style="border-color:${l.id===sel.id?'var(--gold)':'var(--line)'}">
+        <span class="cn">${esc(l.name)}</span><span class="cf ipa">${esc(ipa(sameGloss.segs))}</span></div>`;
+    }
+  });
+  const opts=Object.keys(sel.words).map(k=>`<option value="${esc(k)}" ${k===key?'selected':''}>${esc(glossOf(m,k))}</option>`).join('');
+  return`
+  <div class="etymHead">
+    <div class="modern ipa">${esc(ipa(e.segs))}</div>
+    <div class="rom">${esc(romanize(e.segs))}</div>
+    <div class="g">&ldquo;${esc(g)}&rdquo; in ${esc(sel.name)}</div>
+    <div style="margin-top:12px"><select id="etymSel">${opts}</select></div>
+  </div>
+  <div class="timeline">${items}</div>
+  <div class="card" style="margin-top:20px;background:var(--panel2)">
+    <h2><span class="ic">&#9884;</span> Cognates across the family</h2>
+    <div class="hint" style="margin-bottom:8px">The same ancestral word, evolved differently in each daughter language.</div>
+    <div class="cognates">${cogs}</div>
+  </div>`;
+}
+
+/* ---- sound changes ---- */
+function renderSound(){
+  const m=state.model,sel=state.sel;
+  const path=pathOf(sel);
+  let out='';
+  path.forEach(n=>{
+    if(!n.rules||!n.rules.length)return;
+    out+=`<div class="epoch"><div class="ey">year +${n.year} &nbsp;&middot;&nbsp; <span style="color:var(--dim);font-style:italic">${esc(n.name)}</span></div>`;
+    out+=n.rules.map(r=>`<span class="rulechip"><span class="rn">${esc(r.name)}</span><span class="rd">${esc(r.desc)}</span></span>`).join('');
+    out+=`</div>`;
+  });
+  if(!out)out='<div class="empty">This lineage underwent no recorded sound shifts.</div>';
+  return`<div class="hint" style="margin-bottom:12px">Every regular sound change on the road from ${esc(m.protoName)} to ${esc(sel.name)}, in order.</div>${out}`;
+}
+
+/* ---- grammar ---- */
+function renderGrammar(){
+  const sel=state.sel;
+  const sum=grammarSummary(sel.grammar).map(s=>`<div class="gi"><div class="k">${s[0]}</div><div class="v">${esc(String(s[1]))}</div></div>`).join('');
+  const log=sel.grammarLog.map(l=>`<li><span class="gy">${l.year===0?'year 0':'+'+l.year}</span><span>${esc(l.text)}</span></li>`).join('');
+  return`
+  <div class="card" style="background:var(--panel2)"><h2><span class="ic">&#9638;</span> Modern grammar of ${esc(sel.name)}</h2>
+    <div class="gsum">${sum}</div></div>
+  <div class="card"><h2><span class="ic">&#8635;</span> How the grammar changed</h2>
+    <ul class="glog">${log}</ul></div>`;
+}
+
+/* ---- writing ---- */
+function renderWriting(){
+  const m=state.model,sel=state.sel;
+  const path=pathOf(sel);
+  // pick a demonstrated word
+  const demoKey=(sel.words['name']?'name':(sel.words['sun']?'sun':Object.keys(sel.words)[0]));
+  const g=glossOf(m,demoKey);
+  // choose 3 stages: early(after invention), mid, modern
+  const inv=m.span*0.25;
+  const targets=[inv+ (m.span-inv)*0.05, inv+(m.span-inv)*0.5, m.span];
+  const stageNodes=targets.map(ty=>{
+    let best=path[0],bd=1e9;
+    path.forEach(n=>{const d=Math.abs(n.year-ty);if(d<bd&&n.year>=inv-1){bd=d;best=n;}});
+    return best;
+  });
+  // ensure distinct & valid
+  let cards='';
+  const seen=new Set();
+  stageNodes.forEach(n=>{
+    if(seen.has(n.id))return;seen.add(n.id);
+    const wt=writingType(n.year,m.span);
+    const e=n.words[demoKey];
+    let glyphs='';
+    e.segs.forEach(s=>{
+      const gl=n.glyphs[s]||baseGlyph(makeRng(hashStr('x'+s)));
+      glyphs+=glyphSVG(gl);
+    });
+    cards+=`<div class="scriptstage">
+      <div class="stype">${wt.t}</div>
+      <div class="syr">year +${n.year} &middot; ${wt.d}</div>
+      <div class="glyphword">${glyphs}</div>
+      <div class="sform ipa">${esc(ipa(e.segs))}</div>
+    </div>`;
+  });
+  return`
+  <div class="hint" style="margin-bottom:12px">The word &ldquo;${esc(g)}&rdquo; written in ${esc(sel.name)}'s script as it drifted from pictographs toward an alphabet. Each glyph descends from a proto-sign, simplifying and mutating over centuries.</div>
+  <div class="scriptrow">${cards}</div>
+  <div class="card" style="margin-top:18px;background:var(--panel2)">
+    <h2><span class="ic">&#9998;</span> Full modern signary</h2>
+    <div class="hint" style="margin-bottom:10px">One glyph per phoneme in the living language.</div>
+    <div class="glyphword" style="justify-content:flex-start">${
+      Array.from(invOfWords(sel)).slice(0,26).map(s=>{
+        const gl=sel.glyphs[s]||baseGlyph(makeRng(hashStr('y'+s)));
+        return`<div style="text-align:center">${glyphSVG(gl)}<div style="font-size:11px;color:var(--dim)" class="ipa">${esc(s)}</div></div>`;
+      }).join('')
+    }</div>
+  </div>`;
+}
+
+/* ---- phonology ---- */
+function renderPhon(){
+  const m=state.model,sel=state.sel;
+  const protoSet=new Set(m.inv.consonants.concat(m.inv.vowels));
+  const modernSet=invOfWords(sel);
+  const allC=ALL_C.filter(c=>protoSet.has(c)||modernSet.has(c));
+  const allV=ALL_V.concat(['ə','ɑ','ɔ','ɛ']).filter((v,i,a)=>a.indexOf(v)===i).filter(v=>protoSet.has(v)||modernSet.has(v));
+  function chip(s){
+    const inP=protoSet.has(s),inM=modernSet.has(s);
+    let cls='ph';if(inM&&!inP)cls+=' new';if(inP&&!inM)cls+=' lost';
+    return`<span class="${cls} ipa">${esc(s)}</span>`;
+  }
+  return`
+  <div class="card" style="background:var(--panel2)">
+    <h2><span class="ic">&#128266;</span> Phoneme inventory of ${esc(sel.name)}</h2>
+    <div class="hint">Compared with proto-inventory. <span style="color:var(--ok)">Green</span> = innovated by sound change &middot; <span style="color:var(--rust)">struck-through</span> = lost from the proto-language.</div>
+    <div style="font-size:12px;color:var(--faint);text-transform:uppercase;letter-spacing:.7px;margin-top:12px">Consonants</div>
+    <div class="phchips">${allC.map(chip).join('')}</div>
+    <div style="font-size:12px;color:var(--faint);text-transform:uppercase;letter-spacing:.7px">Vowels</div>
+    <div class="phchips">${allV.map(chip).join('')}</div>
+  </div>
+  <div class="card">
+    <h2><span class="ic">&#9776;</span> Syllable structure</h2>
+    <div style="font-size:22px;color:var(--gold2);font-family:monospace;letter-spacing:2px">${esc(m.inv.structure)}</div>
+    <div class="hint" style="margin-top:6px">C = consonant, V = vowel, (…) = optional. The proto-template from which all roots were coined.</div>
+  </div>`;
+}
+
+/* ---------- panel wiring ---------- */
+function wirePanel(){
+  if(state.tab==='vocab'){
+    document.querySelectorAll('.vtable tr[data-key]').forEach(tr=>{
+      tr.addEventListener('click',()=>{state.etymKey=tr.dataset.key;state.tab='etym';renderAll();});
+    });
+    const doSearch=()=>{
+      const q=document.getElementById('vsearch').value.trim().toLowerCase();
+      if(!q)return;
+      const sel=state.sel;
+      let hit=Object.keys(sel.words).find(k=>glossOf(state.model,k).toLowerCase()===q)||
+              Object.keys(sel.words).find(k=>glossOf(state.model,k).toLowerCase().indexOf(q)>=0)||
+              Object.keys(sel.words).find(k=>romanize(sel.words[k].segs).toLowerCase()===q)||
+              Object.keys(sel.words).find(k=>ipa(sel.words[k].segs)===q);
+      if(hit){state.etymKey=hit;state.tab='etym';renderAll();}
+      else{const inp=document.getElementById('vsearch');inp.value='';inp.placeholder='No match — try another word…';}
+    };
+    document.getElementById('vsearchBtn').addEventListener('click',doSearch);
+    document.getElementById('vsearch').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+  }
+  if(state.tab==='etym'){
+    const s=document.getElementById('etymSel');
+    if(s)s.addEventListener('change',()=>{state.etymKey=s.value;renderAll();});
+  }
+}
+
+/* ---------- init & controls ---------- */
+document.getElementById('spanRange').addEventListener('input',e=>{
+  document.getElementById('spanOut').textContent=e.target.value+' yrs';
+});
+document.getElementById('genBtn').addEventListener('click',generate);
+document.getElementById('randBtn').addEventListener('click',()=>{
+  const syl=['an','ka','tho','mir','ves','lun','dor','sha','kel','ryn','pao','tul','wen','gor','sil','nax'];
+  const r=makeRng((Date.now()^Math.floor(Math.random()*1e9))>>>0);
+  document.getElementById('seed').value=r.pick(syl)+r.pick(syl)+(r.chance(.5)?r.pick(syl):'');
+  generate();
+});
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>setTab(t.dataset.tab)));
+
+generate();
+</script>
+</body>
+</html>

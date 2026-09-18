@@ -1,0 +1,335 @@
+<meta charset="utf-8">
+<title>4D Hypercube Explorer</title>
+<style>
+  :root{
+    --bg:#05060d;
+    --panel:rgba(14,17,34,.72);
+    --border:rgba(120,160,255,.18);
+    --text:#c9d4ff;
+    --muted:#7c86b8;
+    --accent:#5cc8ff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:var(--text)}
+  #stage{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%;cursor:grab}
+  canvas.drag{cursor:grabbing}
+
+  #panel{
+    position:fixed;top:16px;left:16px;width:290px;max-height:calc(100vh - 32px);
+    overflow:auto;padding:16px 16px 18px;border:1px solid var(--border);
+    border-radius:14px;background:var(--panel);backdrop-filter:blur(14px);
+    box-shadow:0 10px 40px rgba(0,0,0,.5);z-index:10;user-select:none;
+  }
+  h1{margin:0 0 2px;font-size:15px;letter-spacing:.5px;color:#fff}
+  .sub{margin:0 0 14px;font-size:11px;color:var(--muted);line-height:1.5}
+  .group{margin:14px 0 0;padding-top:12px;border-top:1px solid rgba(255,255,255,.06)}
+  .group:first-of-type{border-top:0;padding-top:0}
+  label{display:block;font-size:11px;color:var(--muted);margin:0 0 6px;
+    display:flex;justify-content:space-between;gap:8px}
+  label b{color:var(--accent);font-weight:600}
+  input[type=range]{width:100%;height:4px;-webkit-appearance:none;appearance:none;
+    background:linear-gradient(90deg,#3a5cff,#5cc8ff);border-radius:3px;outline:none;margin:2px 0 4px}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+    border-radius:50%;background:#fff;box-shadow:0 0 8px var(--accent);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;
+    background:#fff;box-shadow:0 0 8px var(--accent);cursor:pointer}
+  .seg{display:flex;gap:6px;flex-wrap:wrap}
+  .seg button{flex:1;min-width:70px;padding:7px 4px;font:inherit;font-size:11px;
+    color:var(--muted);background:rgba(255,255,255,.04);border:1px solid var(--border);
+    border-radius:8px;cursor:pointer;transition:.15s}
+  .seg button:hover{color:var(--text);border-color:rgba(120,160,255,.4)}
+  .seg button.on{color:#04121f;background:var(--accent);border-color:var(--accent);
+    box-shadow:0 0 14px rgba(92,200,255,.5)}
+  .row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);
+    margin:8px 0;cursor:pointer}
+  .row input{accent-color:var(--accent);width:14px;height:14px}
+  .hint{font-size:10px;color:var(--muted);line-height:1.6;margin-top:12px;opacity:.75}
+  kbd{background:rgba(255,255,255,.08);border-radius:4px;padding:1px 5px;font-size:10px}
+</style>
+
+<div id="stage"><canvas id="c"></canvas></div>
+
+<div id="panel">
+  <h1>4D Hypercube Explorer</h1>
+  <p class="sub">Drag to rotate in 4-space. A tesseract has 16 vertices, 32 edges, 8 cubic cells.</p>
+
+  <div class="group">
+    <label>Projection 4D&nbsp;&rarr;&nbsp;3D</label>
+    <div class="seg" id="proj4">
+      <button data-v="persp" class="on">Perspective</button>
+      <button data-v="ortho">Orthographic</button>
+      <button data-v="stereo">Stereographic</button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label>Render mode</label>
+    <div class="seg" id="mode">
+      <button data-v="edges" class="on">Wireframe</button>
+      <button data-v="slice">4D Slice</button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label>4D depth (W camera) <b id="lw">3.0</b></label>
+    <input type="range" id="w4" min="1.8" max="6" step="0.05" value="3">
+    <label>Glow intensity <b id="lg">1.0</b></label>
+    <input type="range" id="glow" min="0" max="2" step="0.05" value="1">
+  </div>
+
+  <div class="group" id="sliceGroup" style="display:none">
+    <label>Slice position&nbsp;<span style="opacity:.6">(hyperplane w)</span> <b id="ls">0.00</b></label>
+    <input type="range" id="slice" min="-1" max="1" step="0.01" value="0">
+    <div class="row" id="animRow"><input type="checkbox" id="anim"> Animate slice sweep</div>
+  </div>
+
+  <div class="group">
+    <label>Auto-spin (ZW plane) <b id="lz">0.30</b></label>
+    <input type="range" id="zw" min="0" max="1.5" step="0.01" value="0.3">
+    <label>Auto-spin (XW plane) <b id="lx">0.15</b></label>
+    <input type="range" id="xw" min="0" max="1.5" step="0.01" value="0.15">
+    <div class="row" id="resetRow"><input type="checkbox" id="reset"> Freeze &amp; reset orientation</div>
+  </div>
+
+  <div class="hint">
+    <kbd>drag</kbd> rotate XY / XZ &nbsp; <kbd>shift+drag</kbd> rotate into W<br>
+    <kbd>scroll</kbd> zoom
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+
+function resize(){
+  W=window.innerWidth; H=window.innerHeight;
+  canvas.width=W*DPR; canvas.height=H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize',resize); resize();
+
+/* ---------- tesseract geometry ---------- */
+const verts=[];
+for(let i=0;i<16;i++){
+  verts.push([ (i&1)?1:-1, (i&2)?1:-1, (i&4)?1:-1, (i&8)?1:-1 ]);
+}
+const edges=[];
+for(let i=0;i<16;i++) for(let j=i+1;j<16;j++){
+  // connect if hamming distance == 1
+  if(((i^j)&((i^j)-1))===0) edges.push([i,j]);
+}
+
+/* ---------- 4D rotation ---------- */
+function rot(v,a,b,ang){ // rotate in plane (axis a, axis b)
+  const c=Math.cos(ang),s=Math.sin(ang);
+  const va=v[a],vb=v[b];
+  v[a]=va*c-vb*s; v[b]=va*s+vb*c;
+}
+// six rotation angles for planes XY XZ XW YZ YW ZW
+let ang={xy:0,xz:0,xw:0,yz:0,yw:0,zw:0};
+
+/* ---------- state / controls ---------- */
+const S={
+  proj4:'persp', mode:'edges',
+  w4:3, glow:1, slice:0, anim:false,
+  zw:0.3, xw:0.15, reset:false,
+  zoom:1
+};
+function bindSeg(id,key,onChange){
+  const wrap=document.getElementById(id);
+  wrap.addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b)return;
+    [...wrap.children].forEach(x=>x.classList.toggle('on',x===b));
+    S[key]=b.dataset.v; onChange&&onChange();
+  });
+}
+bindSeg('proj4','proj4');
+bindSeg('mode','mode',()=>{
+  document.getElementById('sliceGroup').style.display = S.mode==='slice'?'':'none';
+});
+function bindRange(id,key,label,fmt){
+  const el=document.getElementById(id), lab=label&&document.getElementById(label);
+  const upd=()=>{ S[key]=parseFloat(el.value); if(lab)lab.textContent=(fmt||(x=>x.toFixed(2)))(S[key]); };
+  el.addEventListener('input',upd); upd();
+}
+bindRange('w4','w4','lw',x=>x.toFixed(1));
+bindRange('glow','glow','lg',x=>x.toFixed(2));
+bindRange('slice','slice','ls');
+bindRange('zw','zw','lz');
+bindRange('xw','xw','lx');
+document.getElementById('anim').addEventListener('change',e=>S.anim=e.target.checked);
+document.getElementById('reset').addEventListener('change',e=>{
+  S.reset=e.target.checked;
+  if(S.reset){ ang={xy:0,xz:0,xw:0,yz:0,yw:0,zw:0}; }
+});
+
+/* ---------- mouse ---------- */
+let dragging=false,px=0,py=0;
+canvas.addEventListener('pointerdown',e=>{dragging=true;px=e.clientX;py=e.clientY;
+  canvas.classList.add('drag');canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointerup',e=>{dragging=false;canvas.classList.remove('drag');});
+canvas.addEventListener('pointermove',e=>{
+  if(!dragging)return;
+  const dx=(e.clientX-px)*0.01, dy=(e.clientY-py)*0.01;
+  px=e.clientX;py=e.clientY;
+  if(e.shiftKey){ ang.xw+=dx; ang.yw+=dy; }   // drag into the 4th dimension
+  else { ang.xy+=dx; ang.yz+=dy; }            // ordinary 3D-ish rotation
+});
+canvas.addEventListener('wheel',e=>{
+  e.preventDefault();
+  S.zoom*=Math.exp(-e.deltaY*0.0011);
+  S.zoom=Math.max(0.4,Math.min(3,S.zoom));
+},{passive:false});
+
+/* ---------- projection pipeline ---------- */
+function project4to3(p){
+  const w=p[3];
+  if(S.proj4==='ortho') return [p[0],p[1],p[2]];
+  if(S.proj4==='stereo'){
+    const k=1/(S.w4 - w*0.999); // stereographic-style from a 4D pole
+    return [p[0]*k*2, p[1]*k*2, p[2]*k*2];
+  }
+  const k=S.w4/(S.w4 - w); // perspective
+  return [p[0]*k,p[1]*k,p[2]*k];
+}
+function project3to2(p){
+  const d=4.2, k=d/(d - p[2]);
+  const scale=Math.min(W,H)*0.30*S.zoom;
+  return { x:W/2 + p[0]*k*scale, y:H/2 + p[1]*k*scale, z:p[2] };
+}
+
+/* transform a base vertex through current 4D rotation */
+function transform(base){
+  const v=base.slice();
+  rot(v,0,1,ang.xy); rot(v,0,2,ang.xz); rot(v,0,3,ang.xw);
+  rot(v,1,2,ang.yz); rot(v,1,3,ang.yw); rot(v,2,3,ang.zw);
+  return v;
+}
+
+/* ---------- color from 4th dimension ---------- */
+function wColor(w,alpha){
+  // w in [-something, something] -> hue from cyan(210) to magenta(320)
+  const t=Math.max(0,Math.min(1,(w+1.6)/3.2));
+  const hue=200+t*140;
+  return `hsla(${hue},100%,${55+t*10}%,${alpha})`;
+}
+
+/* ---------- rendering ---------- */
+function drawWire(){
+  const P=verts.map(v=>{ const v4=transform(v); const p3=project4to3(v4);
+    return {p:project3to2(p3), w:v4[3], z3:p3[2]}; });
+
+  // sort edges back-to-front by average z
+  const order=edges.map((e,i)=>({e,z:(P[e[0]].z3+P[e[1]].z3)/2}))
+                   .sort((a,b)=>a.z-b.z);
+
+  ctx.lineCap='round';
+  for(const {e} of order){
+    const a=P[e[0]], b=P[e[1]];
+    const wAvg=(a.w+b.w)/2;
+    const depth=(wAvg+1.8)/3.6;            // 0..1 nearer in W = brighter
+    const lw=1.1+depth*2.6;
+    const grad=ctx.createLinearGradient(a.p.x,a.p.y,b.p.x,b.p.y);
+    grad.addColorStop(0,wColor(a.w,0.95));
+    grad.addColorStop(1,wColor(b.w,0.95));
+
+    if(S.glow>0){
+      ctx.shadowBlur=(10+depth*22)*S.glow;
+      ctx.shadowColor=wColor(wAvg,1);
+    } else ctx.shadowBlur=0;
+
+    ctx.strokeStyle=grad;
+    ctx.lineWidth=lw;
+    ctx.beginPath(); ctx.moveTo(a.p.x,a.p.y); ctx.lineTo(b.p.x,b.p.y); ctx.stroke();
+  }
+  // vertices
+  ctx.shadowBlur=8*S.glow;
+  for(const q of P){
+    ctx.fillStyle=wColor(q.w,1);
+    ctx.shadowColor=wColor(q.w,1);
+    ctx.beginPath(); ctx.arc(q.p.x,q.p.y,2.2+ (q.w+1.8)/3.6*2,0,7); ctx.fill();
+  }
+  ctx.shadowBlur=0;
+}
+
+function drawSlice(){
+  // intersect every edge with the hyperplane w = slice (in ROTATED 4-space)
+  const c=S.slice;
+  const V=verts.map(transform);
+  const pts=[];
+  for(const [i,j] of edges){
+    const a=V[i], b=V[j];
+    const wa=a[3], wb=b[3];
+    if((wa-c)*(wb-c) < 0){                 // edge crosses the hyperplane
+      const t=(c-wa)/(wb-wa);
+      const p=[ a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t ];
+      pts.push(p);
+    }
+  }
+  // faint ghost of the full wireframe behind the slice
+  ctx.globalAlpha=0.14; drawWire(); ctx.globalAlpha=1;
+
+  if(pts.length<3){
+    ctx.fillStyle=var_muted(); ctx.font='13px monospace'; ctx.textAlign='center';
+    ctx.fillText('slice is empty at this w — sweep the slider', W/2, H-40);
+    ctx.textAlign='left';
+    return;
+  }
+
+  // project the cross-section points to 2D
+  const proj=pts.map(p=>({...project3to2(p), src:p}));
+  // order them around their 2D centroid to make a convex-ish polygon
+  const cx=proj.reduce((s,q)=>s+q.x,0)/proj.length;
+  const cy=proj.reduce((s,q)=>s+q.y,0)/proj.length;
+  proj.sort((A,B)=>Math.atan2(A.y-cy,A.x-cx)-Math.atan2(B.y-cy,B.x-cx));
+
+  // filled glowing cross-section polygon
+  const hue=200+((c+1)/2)*140;
+  ctx.shadowBlur=30*Math.max(0.2,S.glow); ctx.shadowColor=`hsl(${hue},100%,60%)`;
+  ctx.beginPath();
+  proj.forEach((q,i)=> i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y));
+  ctx.closePath();
+  ctx.fillStyle=`hsla(${hue},90%,60%,0.20)`; ctx.fill();
+  ctx.lineWidth=2.4; ctx.strokeStyle=`hsl(${hue},100%,72%)`; ctx.stroke();
+  ctx.shadowBlur=0;
+  for(const q of proj){
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.arc(q.x,q.y,3,0,7); ctx.fill();
+  }
+
+  ctx.fillStyle='rgba(200,215,255,.55)'; ctx.font='11px monospace';
+  ctx.fillText(`cross-section vertices: ${pts.length}`, 18, H-22);
+}
+
+function var_muted(){return getComputedStyle(document.documentElement).getPropertyValue('--muted')||'#7c86b8';}
+
+/* ---------- main loop ---------- */
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+
+  if(!S.reset){
+    ang.zw += S.zw*dt;
+    ang.xw += S.xw*dt;
+  }
+  if(S.mode==='slice' && S.anim){
+    const sl=document.getElementById('slice');
+    S.slice = Math.sin(now*0.0006);
+    sl.value=S.slice; document.getElementById('ls').textContent=S.slice.toFixed(2);
+  }
+
+  // background with subtle radial vignette
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*0.7);
+  g.addColorStop(0,'#0a0e1e'); g.addColorStop(1,'#05060d');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+  if(S.mode==='slice') drawSlice(); else drawWire();
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>

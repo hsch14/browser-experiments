@@ -1,0 +1,721 @@
+<meta charset="utf-8">
+<title>Infinite Procedural Art</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #0a0a0c; overflow: hidden;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+  canvas { max-width: 100vw; max-height: 100vh; box-shadow: 0 20px 80px rgba(0,0,0,.6);
+    cursor: crosshair; touch-action: manipulation; }
+  #ui { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    display: flex; gap: 10px; align-items: center; background: rgba(18,18,22,.72);
+    backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.09);
+    padding: 9px 12px; border-radius: 14px; z-index: 10; user-select: none;
+    box-shadow: 0 8px 30px rgba(0,0,0,.4); }
+  button { font: inherit; font-size: 13px; color: #eee; background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.12); padding: 8px 14px; border-radius: 9px;
+    cursor: pointer; transition: background .15s, transform .05s; white-space: nowrap; }
+  button:hover { background: rgba(255,255,255,.14); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: linear-gradient(135deg,#6d5efc,#c14bd8); border-color: transparent; }
+  button.primary:hover { filter: brightness(1.12); }
+  #meta { font-size: 11px; color: #8a8a95; line-height: 1.35; min-width: 190px;
+    max-width: 260px; }
+  #meta b { color: #cfcfd8; font-weight: 600; }
+  #seed { color: #9a86ff; }
+  #seedInput { font: inherit; font-size: 12px; width: 90px; color: #cfcfd8;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 9px; padding: 8px 10px; outline: none; transition: border-color .15s; }
+  #seedInput:focus { border-color: #9a86ff; background: rgba(255,255,255,.09); }
+  #seedInput::placeholder { color: #6b6b76; }
+  #seedInput.bad { border-color: #e0556b; }
+  #animLabel { display: flex; align-items: center; gap: 6px; font-size: 12px;
+    color: #b9b9c4; cursor: pointer; user-select: none; }
+  #animChk { accent-color: #9a86ff; width: 15px; height: 15px; cursor: pointer; }
+  #hint { position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    font-size: 12px; color: #6b6b76; z-index: 10; pointer-events: none;
+    transition: opacity .6s; }
+</style>
+
+<div id="stage"><canvas id="c"></canvas></div>
+<div id="hint">click the canvas — or press <b>space</b> — for a new masterpiece</div>
+
+<div id="ui">
+  <div id="meta"></div>
+  <input id="seedInput" type="text" spellcheck="false" placeholder="seed" title="Type a seed code and press Enter to replay it">
+  <button id="new" class="primary">✦ Generate</button>
+  <button id="save">⭳ PNG</button>
+  <label id="animLabel"><input type="checkbox" id="animChk"> Animate</label>
+</div>
+
+<script>
+"use strict";
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const meta = document.getElementById("meta");
+  const hint = document.getElementById("hint");
+  const seedInput = document.getElementById("seedInput");
+
+  // ---- render resolution (square) ----
+  const SIZE = Math.min(1000, Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.92));
+  const W = SIZE, H = SIZE;
+  canvas.width = W; canvas.height = H;
+
+  let currentSeed = 0;
+
+  // ---- offscreen buffers for the animation overlay ----
+  const baseCanvas = document.createElement("canvas");
+  baseCanvas.width = W; baseCanvas.height = H;
+  const baseCtx = baseCanvas.getContext("2d");
+  const trailCanvas = document.createElement("canvas");
+  trailCanvas.width = W; trailCanvas.height = H;
+  const trailCtx = trailCanvas.getContext("2d");
+  let currentPiece = null;
+  let animOn = false, animId = null, aParts = [], aScale = 0.003, aSpeed = 1.5;
+
+  // =========================================================================
+  //  Seeded RNG  (mulberry32 + a helper API)
+  // =========================================================================
+  function makeRng(seed) {
+    let a = seed >>> 0;
+    const next = () => {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    return {
+      next,
+      range: (lo, hi) => lo + (hi - lo) * next(),
+      int: (lo, hi) => Math.floor(lo + (hi - lo + 1) * next()),
+      pick: (arr) => arr[Math.floor(next() * arr.length)],
+      chance: (p) => next() < p,
+      // shuffle in place
+      shuffle: (arr) => { for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(next() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; },
+    };
+  }
+
+  // =========================================================================
+  //  Perlin / simplex-ish value noise  (seeded)
+  // =========================================================================
+  function makeNoise(rng) {
+    const perm = new Uint8Array(512);
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    for (let i = 255; i > 0; i--) { const j = Math.floor(rng.next() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
+    for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+    const grads = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+    const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+    const lerp = (a, b, t) => a + t * (b - a);
+    function grad(hash, x, y) { const g = grads[hash & 7]; return g[0] * x + g[1] * y; }
+    // 2D perlin, returns ~[-1,1]
+    function noise2(x, y) {
+      const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+      const xf = x - Math.floor(x), yf = y - Math.floor(y);
+      const u = fade(xf), v = fade(yf);
+      const aa = perm[perm[X] + Y], ab = perm[perm[X] + Y + 1];
+      const ba = perm[perm[X + 1] + Y], bb = perm[perm[X + 1] + Y + 1];
+      const x1 = lerp(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
+      const x2 = lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
+      return lerp(x1, x2, v);
+    }
+    // fractal brownian motion
+    function fbm(x, y, oct = 5, lac = 2, gain = 0.5) {
+      let amp = 1, freq = 1, sum = 0, norm = 0;
+      for (let i = 0; i < oct; i++) { sum += amp * noise2(x * freq, y * freq); norm += amp; amp *= gain; freq *= lac; }
+      return sum / norm;
+    }
+    return { noise2, fbm };
+  }
+
+  // =========================================================================
+  //  Color / palette helpers
+  // =========================================================================
+  function hsl(h, s, l, a = 1) {
+    h = ((h % 360) + 360) % 360;
+    return `hsla(${h.toFixed(1)},${(s*100).toFixed(1)}%,${(l*100).toFixed(1)}%,${a})`;
+  }
+  // HSL -> RGB (0..255), for pixel buffers
+  function hsl2rgb(h, s, l) {
+    h = ((h % 360) + 360) % 360 / 360;
+    let r, g, b;
+    if (s === 0) { r = g = b = l; }
+    else {
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      const hue = (t) => { t = (t + 1) % 1; if (t < 1/6) return p + (q - p) * 6 * t;
+        if (t < 1/2) return q; if (t < 2/3) return p + (q - p) * (2/3 - t) * 6; return p; };
+      r = hue(h + 1/3); g = hue(h); b = hue(h - 1/3);
+    }
+    return [r * 255, g * 255, b * 255];
+  }
+
+  function makePalette(rng) {
+    const schemes = ["analogous", "complementary", "triad", "split", "mono"];
+    const scheme = rng.pick(schemes);
+    const base = rng.range(0, 360);
+    const sat = rng.range(0.45, 0.9);
+    let hues;
+    switch (scheme) {
+      case "analogous": hues = [base, base + 25, base + 50, base - 25, base - 50]; break;
+      case "complementary": hues = [base, base + 15, base + 180, base + 195, base - 15]; break;
+      case "triad": hues = [base, base + 120, base + 240, base + 15, base + 135]; break;
+      case "split": hues = [base, base + 150, base + 210, base + 30, base - 30]; break;
+      default: hues = [base, base, base, base + 8, base - 8]; break; // mono
+    }
+    const dark = rng.chance(0.62);
+    const bgL = dark ? rng.range(0.03, 0.12) : rng.range(0.88, 0.97);
+    const bgHue = rng.pick(hues);
+    return {
+      scheme, base, sat, dark, hues,
+      bg: { h: bgHue, s: dark ? sat * 0.5 : sat * 0.3, l: bgL },
+      // sample a "foreground" color biased by a param t in [0,1]
+      color(t, lMod = 0, sMod = 0) {
+        const h = hues[Math.floor(t * hues.length) % hues.length] + (t * 40 - 20);
+        const l = dark ? 0.35 + t * 0.4 + lMod : 0.3 + t * 0.35 + lMod;
+        return { h, s: Math.max(0, Math.min(1, sat + sMod)), l: Math.max(0.04, Math.min(0.96, l)) };
+      },
+      css(t, a = 1, lMod = 0) { const c = this.color(t, lMod); return hsl(c.h, c.s, c.l, a); },
+    };
+  }
+
+  // =========================================================================
+  //  Utility: fill background (flat or gradient)
+  // =========================================================================
+  function paintBackground(rng, pal) {
+    const bg = pal.bg;
+    if (rng.chance(0.55)) {
+      const g = ctx.createLinearGradient(0, 0, W * rng.range(-0.3, 1), H);
+      const h2 = bg.h + rng.range(-40, 40);
+      g.addColorStop(0, hsl(bg.h, bg.s, bg.l));
+      g.addColorStop(1, hsl(h2, bg.s, Math.max(0.02, Math.min(0.97, bg.l + (pal.dark ? 0.06 : -0.06)))));
+      ctx.fillStyle = g;
+    } else {
+      ctx.fillStyle = hsl(bg.h, bg.s, bg.l);
+    }
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // =========================================================================
+  //  LAYER: Flow field  (particles advected by noise)
+  // =========================================================================
+  function layerFlowField(rng, pal, noise) {
+    const n = rng.int(900, 2200);
+    const steps = rng.int(60, 180);
+    const scale = rng.range(0.0015, 0.006);
+    const stepLen = rng.range(1.2, 3.2);
+    const lw = rng.range(0.4, 1.8);
+    const alpha = rng.range(0.06, 0.22);
+    ctx.lineWidth = lw;
+    ctx.lineCap = "round";
+    ctx.globalCompositeOperation = pal.dark ? "lighter" : "source-over";
+    for (let i = 0; i < n; i++) {
+      let x = rng.range(0, W), y = rng.range(0, H);
+      const t = rng.next();
+      ctx.strokeStyle = pal.css(t, alpha);
+      ctx.beginPath(); ctx.moveTo(x, y);
+      for (let s = 0; s < steps; s++) {
+        const ang = noise.fbm(x * scale, y * scale, 4) * Math.PI * 3;
+        x += Math.cos(ang) * stepLen; y += Math.sin(ang) * stepLen;
+        if (x < 0 || x > W || y < 0 || y > H) break;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    return "flow field";
+  }
+
+  // =========================================================================
+  //  LAYER: Perlin noise field  (per-pixel, contoured)
+  // =========================================================================
+  function layerPerlinField(rng, pal, noise) {
+    const scale = rng.range(0.002, 0.008);
+    const bands = rng.int(4, 12);
+    const contour = rng.chance(0.5);
+    const alpha = rng.range(0.35, 0.7);
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    const warp = rng.range(0, 60);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let v = noise.fbm(x * scale + noise.noise2(x*scale*0.5, y*scale*0.5)*warp*scale,
+                          y * scale, 5);
+        v = (v + 1) / 2; // 0..1
+        let t = v;
+        if (contour) { const b = v * bands; t = (Math.floor(b) + 0.5) / bands; }
+        const c = pal.color(t);
+        const [r, g, bl] = hsl2rgb(c.h, c.s, c.l);
+        const idx = (y * W + x) * 4;
+        d[idx]   = d[idx]   * (1 - alpha) + r  * alpha;
+        d[idx+1] = d[idx+1] * (1 - alpha) + g  * alpha;
+        d[idx+2] = d[idx+2] * (1 - alpha) + bl * alpha;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return contour ? "perlin contours" : "perlin field";
+  }
+
+  // =========================================================================
+  //  LAYER: Voronoi diagram  (random sites, per-pixel nearest)
+  // =========================================================================
+  function layerVoronoi(rng, pal) {
+    const n = rng.int(14, 60);
+    const sites = [];
+    for (let i = 0; i < n; i++) sites.push({ x: rng.range(0, W), y: rng.range(0, H), t: rng.next() });
+    const stroke = rng.chance(0.6);
+    const alpha = rng.range(0.4, 0.75);
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    // grid-accelerate a little by sampling every pixel (SIZE<=1000 so fine)
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let best = 1e18, best2 = 1e18, bi = 0;
+        for (let i = 0; i < n; i++) {
+          const dx = x - sites[i].x, dy = y - sites[i].y;
+          const dd = dx * dx + dy * dy;
+          if (dd < best) { best2 = best; best = dd; bi = i; }
+          else if (dd < best2) { best2 = dd; }
+        }
+        const c = pal.color(sites[bi].t);
+        let [r, g, bl] = hsl2rgb(c.h, c.s, c.l);
+        // edge highlight where two cells are near-equidistant
+        if (stroke) {
+          const edge = Math.sqrt(best2) - Math.sqrt(best);
+          if (edge < 2.2) { const k = 1 - edge / 2.2; r *= (1-k); g *= (1-k); bl *= (1-k); }
+        }
+        const idx = (y * W + x) * 4;
+        d[idx]   = d[idx]   * (1 - alpha) + r  * alpha;
+        d[idx+1] = d[idx+1] * (1 - alpha) + g  * alpha;
+        d[idx+2] = d[idx+2] * (1 - alpha) + bl * alpha;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return "voronoi";
+  }
+
+  // =========================================================================
+  //  LAYER: Reaction–diffusion  (Gray–Scott, low-res, upscaled)
+  // =========================================================================
+  function layerReactionDiffusion(rng, pal) {
+    const GS = rng.int(150, 220);          // sim grid
+    const iters = rng.int(1400, 2600);
+    const dA = 1.0, dB = 0.5;
+    const feed = rng.range(0.026, 0.062);
+    const kill = rng.range(0.058, 0.066);
+    let A = new Float32Array(GS * GS).fill(1);
+    let B = new Float32Array(GS * GS).fill(0);
+    // random seeds
+    const seeds = rng.int(4, 12);
+    for (let s = 0; s < seeds; s++) {
+      const cx = rng.int(4, GS - 4), cy = rng.int(4, GS - 4), r = rng.int(2, 8);
+      for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) {
+        const px = cx + x, py = cy + y;
+        if (px >= 0 && px < GS && py >= 0 && py < GS && x*x+y*y <= r*r) B[py * GS + px] = 1;
+      }
+    }
+    let A2 = new Float32Array(GS * GS), B2 = new Float32Array(GS * GS);
+    const idx = (x, y) => ((y + GS) % GS) * GS + ((x + GS) % GS);
+    for (let it = 0; it < iters; it++) {
+      for (let y = 0; y < GS; y++) {
+        for (let x = 0; x < GS; x++) {
+          const i = y * GS + x;
+          const a = A[i], b = B[i];
+          // laplacian (wrap)
+          const lapA = A[idx(x-1,y)] + A[idx(x+1,y)] + A[idx(x,y-1)] + A[idx(x,y+1)]
+            + 0.5*(A[idx(x-1,y-1)]+A[idx(x+1,y-1)]+A[idx(x-1,y+1)]+A[idx(x+1,y+1)]) - 6*a;
+          const lapB = B[idx(x-1,y)] + B[idx(x+1,y)] + B[idx(x,y-1)] + B[idx(x,y+1)]
+            + 0.5*(B[idx(x-1,y-1)]+B[idx(x+1,y-1)]+B[idx(x-1,y+1)]+B[idx(x+1,y+1)]) - 6*b;
+          const abb = a * b * b;
+          A2[i] = a + (dA * lapA - abb + feed * (1 - a));
+          B2[i] = b + (dB * lapB + abb - (kill + feed) * b);
+        }
+      }
+      [A, A2] = [A2, A]; [B, B2] = [B2, B];
+    }
+    // render B, upscaled + palette-mapped, blended over canvas
+    const alpha = rng.range(0.55, 0.85);
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    for (let y = 0; y < H; y++) {
+      const gy = Math.floor(y / H * GS);
+      for (let x = 0; x < W; x++) {
+        const gx = Math.floor(x / W * GS);
+        let v = A[gy * GS + gx] - B[gy * GS + gx];
+        v = Math.max(0, Math.min(1, (v + 0.2) / 1.2));
+        const c = pal.color(1 - v);
+        const [r, g, bl] = hsl2rgb(c.h, c.s, c.l);
+        const i = (y * W + x) * 4;
+        d[i]   = d[i]   * (1 - alpha) + r  * alpha;
+        d[i+1] = d[i+1] * (1 - alpha) + g  * alpha;
+        d[i+2] = d[i+2] * (1 - alpha) + bl * alpha;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return "reaction–diffusion";
+  }
+
+  // =========================================================================
+  //  LAYER: Cellular automata  (cyclic CA -> spirals/waves)
+  // =========================================================================
+  function layerCellular(rng, pal) {
+    const GS = rng.int(120, 200);
+    const states = rng.int(6, 16);
+    const threshold = rng.int(1, 3);
+    const gens = rng.int(30, 90);
+    let grid = new Int16Array(GS * GS);
+    for (let i = 0; i < grid.length; i++) grid[i] = rng.int(0, states - 1);
+    let next = new Int16Array(GS * GS);
+    const at = (x, y) => grid[((y + GS) % GS) * GS + ((x + GS) % GS)];
+    for (let g = 0; g < gens; g++) {
+      for (let y = 0; y < GS; y++) for (let x = 0; x < GS; x++) {
+        const cur = grid[y * GS + x];
+        const nextState = (cur + 1) % states;
+        let count = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          if (dx || dy) if (at(x + dx, y + dy) === nextState) count++;
+        }
+        next[y * GS + x] = count >= threshold ? nextState : cur;
+      }
+      [grid, next] = [next, grid];
+    }
+    const alpha = rng.range(0.5, 0.8);
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    for (let y = 0; y < H; y++) {
+      const gy = Math.floor(y / H * GS);
+      for (let x = 0; x < W; x++) {
+        const gx = Math.floor(x / W * GS);
+        const t = grid[gy * GS + gx] / states;
+        const c = pal.color(t);
+        const [r, g, bl] = hsl2rgb(c.h, c.s, c.l);
+        const i = (y * W + x) * 4;
+        d[i]   = d[i]   * (1 - alpha) + r  * alpha;
+        d[i+1] = d[i+1] * (1 - alpha) + g  * alpha;
+        d[i+2] = d[i+2] * (1 - alpha) + bl * alpha;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return "cellular automata";
+  }
+
+  // =========================================================================
+  //  LAYER: Fractal  (recursive tree OR subdivision OR Julia set)
+  // =========================================================================
+  function layerFractal(rng, pal, noise) {
+    const kind = rng.pick(["tree", "subdivision", "julia"]);
+    if (kind === "julia") {
+      const cx = rng.range(-0.8, 0.4), cy = rng.range(-0.8, 0.8);
+      const zoom = rng.range(1.1, 1.8);
+      const maxIt = rng.int(60, 140);
+      const alpha = rng.range(0.55, 0.85);
+      const img = ctx.getImageData(0, 0, W, H);
+      const d = img.data;
+      const rot = rng.range(0, Math.PI * 2), cs = Math.cos(rot), sn = Math.sin(rot);
+      for (let py = 0; py < H; py++) {
+        for (let px = 0; px < W; px++) {
+          let zx0 = (px / W - 0.5) * zoom * 2, zy0 = (py / H - 0.5) * zoom * 2;
+          let zx = zx0 * cs - zy0 * sn, zy = zx0 * sn + zy0 * cs;
+          let it = 0;
+          for (; it < maxIt; it++) {
+            const xt = zx * zx - zy * zy + cx;
+            zy = 2 * zx * zy + cy; zx = xt;
+            if (zx * zx + zy * zy > 4) break;
+          }
+          const t = it >= maxIt ? 0 : it / maxIt;
+          const c = pal.color(Math.pow(t, 0.6));
+          const [r, g, bl] = hsl2rgb(c.h, c.s, it >= maxIt ? c.l * 0.3 : c.l);
+          const i = (py * W + px) * 4;
+          d[i]   = d[i]   * (1 - alpha) + r  * alpha;
+          d[i+1] = d[i+1] * (1 - alpha) + g  * alpha;
+          d[i+2] = d[i+2] * (1 - alpha) + bl * alpha;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      return "julia set";
+    }
+    if (kind === "tree") {
+      const trees = rng.int(3, 8);
+      ctx.globalCompositeOperation = pal.dark ? "lighter" : "source-over";
+      for (let n = 0; n < trees; n++) {
+        const baseX = rng.range(0, W);
+        const len = rng.range(H * 0.1, H * 0.24);
+        const ang = -Math.PI / 2 + rng.range(-0.4, 0.4);
+        const spread = rng.range(0.35, 0.75);
+        const t0 = rng.next();
+        branch(baseX, H * rng.range(0.9, 1.02), ang, len, rng.int(9, 12), spread, t0);
+      }
+      ctx.globalCompositeOperation = "source-over";
+      function branch(x, y, ang, len, depth, spread, t) {
+        if (depth <= 0 || len < 1.5) return;
+        const x2 = x + Math.cos(ang) * len, y2 = y + Math.sin(ang) * len;
+        ctx.strokeStyle = pal.css(t, 0.55);
+        ctx.lineWidth = depth * 0.6;
+        ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.stroke();
+        const wob = noise.noise2(x * 0.01, y * 0.01) * 0.3;
+        branch(x2, y2, ang - spread + wob, len * rng.range(0.62, 0.78), depth - 1, spread, t + 0.03);
+        branch(x2, y2, ang + spread + wob, len * rng.range(0.62, 0.78), depth - 1, spread, t + 0.03);
+        if (rng.chance(0.25)) branch(x2, y2, ang + wob, len * 0.7, depth - 1, spread, t + 0.02);
+      }
+      return "fractal trees";
+    }
+    // subdivision
+    const alpha = rng.range(0.6, 0.9);
+    const minS = rng.range(W * 0.02, W * 0.06);
+    function divide(x, y, w, h, depth) {
+      const split = depth > 0 && (w > minS || h > minS) && rng.chance(0.82);
+      if (!split) {
+        ctx.fillStyle = pal.css(rng.next(), alpha);
+        const pad = rng.range(0, Math.min(w, h) * 0.12);
+        ctx.fillRect(x + pad, y + pad, w - pad * 2, h - pad * 2);
+        return;
+      }
+      if (w > h) { const s = w * rng.range(0.35, 0.65); divide(x, y, s, h, depth - 1); divide(x + s, y, w - s, h, depth - 1); }
+      else { const s = h * rng.range(0.35, 0.65); divide(x, y, w, s, depth - 1); divide(x, y + s, w, h - s, depth - 1); }
+    }
+    divide(0, 0, W, H, rng.int(7, 11));
+    return "recursive subdivision";
+  }
+
+  // =========================================================================
+  //  LAYER: Particle system  (attractor / burst dots)
+  // =========================================================================
+  function layerParticles(rng, pal, noise) {
+    const mode = rng.pick(["orbits", "dust", "constellation"]);
+    ctx.globalCompositeOperation = pal.dark ? "lighter" : "source-over";
+    if (mode === "orbits") {
+      const centers = [];
+      const nc = rng.int(2, 5);
+      for (let i = 0; i < nc; i++) centers.push({ x: rng.range(0, W), y: rng.range(0, H), m: rng.range(80, 400) });
+      const n = rng.int(400, 900);
+      for (let i = 0; i < n; i++) {
+        let x = rng.range(0, W), y = rng.range(0, H);
+        let vx = rng.range(-1, 1), vy = rng.range(-1, 1);
+        const t = rng.next();
+        ctx.fillStyle = pal.css(t, rng.range(0.1, 0.4));
+        const steps = rng.int(40, 120);
+        for (let s = 0; s < steps; s++) {
+          for (const c of centers) {
+            const dx = c.x - x, dy = c.y - y; const d2 = dx*dx + dy*dy + 60;
+            const f = c.m / d2; vx += dx / Math.sqrt(d2) * f; vy += dy / Math.sqrt(d2) * f;
+          }
+          vx *= 0.98; vy *= 0.98; x += vx; y += vy;
+          const r = rng.range(0.5, 1.6);
+          ctx.fillRect(x, y, r, r);
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return "orbital particles";
+    }
+    if (mode === "dust") {
+      const n = rng.int(3000, 8000);
+      const scale = rng.range(0.002, 0.006);
+      for (let i = 0; i < n; i++) {
+        const x = rng.range(0, W), y = rng.range(0, H);
+        const den = (noise.fbm(x * scale, y * scale, 4) + 1) / 2;
+        if (rng.next() > den) continue;
+        ctx.fillStyle = pal.css(den, rng.range(0.2, 0.7));
+        const r = rng.range(0.6, 2.4);
+        ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return "particle dust";
+    }
+    // constellation
+    const n = rng.int(40, 110);
+    const pts = [];
+    for (let i = 0; i < n; i++) pts.push({ x: rng.range(0, W), y: rng.range(0, H), t: rng.next() });
+    const linkD = rng.range(W * 0.08, W * 0.16);
+    ctx.lineWidth = rng.range(0.4, 1);
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
+        const dd = Math.sqrt(dx*dx + dy*dy);
+        if (dd < linkD) { ctx.strokeStyle = pal.css(pts[i].t, (1 - dd/linkD) * 0.35);
+          ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke(); }
+      }
+    }
+    for (const p of pts) { ctx.fillStyle = pal.css(p.t, 0.9);
+      ctx.beginPath(); ctx.arc(p.x, p.y, rng.range(1, 3), 0, 7); ctx.fill(); }
+    ctx.globalCompositeOperation = "source-over";
+    return "constellation";
+  }
+
+  // =========================================================================
+  //  Post: subtle vignette + film grain
+  // =========================================================================
+  function postProcess(rng, pal) {
+    // vignette
+    const g = ctx.createRadialGradient(W/2, H/2, W*0.2, W/2, H/2, W*0.75);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, pal.dark ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.12)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // grain
+    if (rng.chance(0.85)) {
+      const amt = rng.range(6, 16);
+      const img = ctx.getImageData(0, 0, W, H); const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const nz = (rng.next() - 0.5) * amt;
+        d[i] += nz; d[i+1] += nz; d[i+2] += nz;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+  }
+
+  // =========================================================================
+  //  Composition engine
+  // =========================================================================
+  const LAYERS = {
+    "flow field": layerFlowField,
+    "perlin": layerPerlinField,
+    "voronoi": layerVoronoi,
+    "reaction diffusion": layerReactionDiffusion,
+    "cellular automata": layerCellular,
+    "fractal": layerFractal,
+    "particles": layerParticles,
+  };
+
+  function generate(seed) {
+    currentSeed = seed >>> 0;
+    const rng = makeRng(currentSeed);
+    const noise = makeNoise(rng);
+    const pal = makePalette(rng);
+
+    paintBackground(rng, pal);
+
+    // pick a "base/structural" layer that fills the frame, then additive overlays
+    const heavy = ["perlin", "voronoi", "reaction diffusion", "cellular automata", "fractal"];
+    const light = ["flow field", "particles", "fractal"];
+
+    const keys = Object.keys(LAYERS);
+    rng.shuffle(keys);
+
+    const nLayers = rng.int(2, 4);
+    const chosen = [];
+    // guarantee one heavy base first sometimes
+    if (rng.chance(0.7)) chosen.push(rng.pick(heavy));
+    for (const k of keys) {
+      if (chosen.length >= nLayers) break;
+      if (!chosen.includes(k)) chosen.push(k);
+    }
+
+    const used = [];
+    for (const k of chosen) {
+      const label = LAYERS[k](rng, pal, noise);
+      used.push(label);
+    }
+
+    postProcess(rng, pal);
+
+    // snapshot the static composition so the animation overlay can redraw over it
+    baseCtx.clearRect(0, 0, W, H);
+    baseCtx.drawImage(canvas, 0, 0);
+    currentPiece = { seed: currentSeed, noise, pal };
+    aScale = rng.range(0.0015, 0.0045);
+    aSpeed = rng.range(1.1, 2.2);
+    if (animOn) startAnim();
+    seedInput.value = "#" + currentSeed.toString(36);
+    seedInput.classList.remove("bad");
+
+    meta.innerHTML =
+      `<b>seed</b> <span id="seed">#${currentSeed.toString(36)}</span><br>` +
+      `<b>palette</b> ${pal.scheme}${pal.dark ? " · dark" : " · light"}<br>` +
+      `<b>layers</b> ${used.join(" + ")}`;
+  }
+
+  // =========================================================================
+  //  Animation overlay  (living flow field driven by the piece's own noise)
+  // =========================================================================
+  function startAnim() {
+    initAnimParticles();
+    if (!animId) animId = requestAnimationFrame(animFrame);
+  }
+  function stopAnim() {
+    if (animId) { cancelAnimationFrame(animId); animId = null; }
+  }
+  function initAnimParticles() {
+    trailCtx.clearRect(0, 0, W, H);
+    const rng = makeRng((currentSeed ^ 0x9e3779b9) >>> 0);
+    const count = 1600;
+    aParts = new Array(count);
+    for (let i = 0; i < count; i++)
+      aParts[i] = { x: rng.range(0, W), y: rng.range(0, H), t: rng.next(), life: rng.int(20, 240) };
+  }
+  function animFrame(now) {
+    if (!currentPiece) { animId = null; return; }
+    const { noise, pal } = currentPiece;
+    // fade the existing trails toward transparent
+    trailCtx.globalCompositeOperation = "destination-out";
+    trailCtx.fillStyle = "rgba(0,0,0,0.05)";
+    trailCtx.fillRect(0, 0, W, H);
+    trailCtx.globalCompositeOperation = pal.dark ? "lighter" : "source-over";
+    trailCtx.lineWidth = 1.15; trailCtx.lineCap = "round";
+    const drift = now * 0.00006 * Math.PI * 2;   // slow rotation of the whole field over time
+    for (let i = 0; i < aParts.length; i++) {
+      const p = aParts[i];
+      const ang = noise.fbm(p.x * aScale, p.y * aScale, 4) * Math.PI * 3 + drift;
+      const nx = p.x + Math.cos(ang) * aSpeed, ny = p.y + Math.sin(ang) * aSpeed;
+      trailCtx.strokeStyle = pal.css(p.t, 0.5);
+      trailCtx.beginPath(); trailCtx.moveTo(p.x, p.y); trailCtx.lineTo(nx, ny); trailCtx.stroke();
+      p.x = nx; p.y = ny; p.life--;
+      if (p.life <= 0 || nx < 0 || nx > W || ny < 0 || ny > H) {
+        p.x = Math.random() * W; p.y = Math.random() * H;
+        p.t = Math.random(); p.life = 20 + Math.random() * 220;
+      }
+    }
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(baseCanvas, 0, 0);
+    ctx.drawImage(trailCanvas, 0, 0);
+    animId = requestAnimationFrame(animFrame);
+  }
+
+  // =========================================================================
+  //  UI wiring
+  // =========================================================================
+  function randomSeed() { return (Math.random() * 0xFFFFFFFF) >>> 0; }
+
+  function newPiece() { hint.style.opacity = "0"; generate(randomSeed()); }
+
+  function savePNG() {
+    const a = document.createElement("a");
+    a.download = `procedural-art-${currentSeed.toString(36)}.png`;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  }
+
+  function applySeedInput() {
+    const v = seedInput.value.trim().replace(/^#/, "");
+    if (!v) { newPiece(); return; }
+    const s = parseInt(v, 36);
+    if (!isFinite(s) || isNaN(s)) { seedInput.classList.add("bad"); return; }
+    seedInput.classList.remove("bad");
+    hint.style.opacity = "0";
+    generate(s >>> 0);
+  }
+
+  canvas.addEventListener("click", newPiece);
+  document.getElementById("new").addEventListener("click", (e) => { e.stopPropagation(); newPiece(); });
+  document.getElementById("save").addEventListener("click", (e) => { e.stopPropagation(); savePNG(); });
+  document.getElementById("animChk").addEventListener("change", (e) => {
+    animOn = e.target.checked;
+    if (animOn) startAnim();
+    else { stopAnim(); ctx.globalCompositeOperation = "source-over"; ctx.drawImage(baseCanvas, 0, 0); }
+  });
+  seedInput.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); applySeedInput(); seedInput.blur(); }
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.target === seedInput) return;
+    if (e.code === "Space") { e.preventDefault(); newPiece(); }
+    if (e.key === "s" || e.key === "S") savePNG();
+  });
+
+  // first piece
+  generate(randomSeed());
+})();
+</script>

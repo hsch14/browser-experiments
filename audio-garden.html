@@ -1,0 +1,736 @@
+<meta charset="utf-8">
+<title>Audioscape — Generative Music Garden</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --ui-bg: rgba(10,12,20,.72);
+    --ui-border: rgba(255,255,255,.14);
+    --ui-fg: #e8ecf5;
+    --ui-dim: #9aa3b8;
+    --accent: #7fd8ff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:#05060c;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ui-fg)}
+  #stage{position:fixed;inset:0;display:block}
+  /* ---------- Landing / drop zone ---------- */
+  #intro{
+    position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:22px;text-align:center;padding:24px;z-index:20;
+    background:radial-gradient(120% 120% at 50% 30%, #10142a 0%, #06070f 60%, #04040a 100%);
+    transition:opacity .8s ease;
+  }
+  #intro.hidden{opacity:0;pointer-events:none}
+  #intro h1{
+    margin:0;font-weight:700;font-size:clamp(28px,6vw,56px);letter-spacing:-.02em;
+    background:linear-gradient(100deg,#7fd8ff,#c69bff 40%,#ff9ecb 70%,#ffd67f);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  #intro p{margin:0;max-width:560px;color:var(--ui-dim);line-height:1.6;font-size:clamp(13px,1.6vw,16px)}
+  .drop{
+    margin-top:8px;border:1.5px dashed rgba(255,255,255,.28);border-radius:18px;
+    padding:34px 46px;cursor:pointer;transition:.25s;background:rgba(255,255,255,.03);
+    display:flex;flex-direction:column;align-items:center;gap:10px;min-width:min(420px,86vw);
+  }
+  .drop:hover,.drop.drag{border-color:var(--accent);background:rgba(127,216,255,.08);transform:translateY(-2px)}
+  .drop .big{font-size:17px;font-weight:600}
+  .drop .sub{font-size:12.5px;color:var(--ui-dim)}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;max-width:560px;margin-top:6px}
+  .legend span{font-size:12px;color:var(--ui-dim);display:flex;align-items:center;gap:6px}
+  .legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
+  /* ---------- HUD ---------- */
+  #hud{
+    position:fixed;left:14px;bottom:14px;z-index:15;display:flex;align-items:center;gap:12px;
+    background:var(--ui-bg);border:1px solid var(--ui-border);border-radius:14px;padding:9px 12px;
+    backdrop-filter:blur(12px);opacity:0;transition:opacity .4s;max-width:calc(100vw - 28px)
+  }
+  #hud.show{opacity:1}
+  #hud button{
+    background:rgba(255,255,255,.08);color:var(--ui-fg);border:1px solid var(--ui-border);
+    border-radius:9px;width:34px;height:34px;cursor:pointer;font-size:14px;display:grid;place-items:center;transition:.2s
+  }
+  #hud button:hover{background:rgba(255,255,255,.16)}
+  #trackName{font-size:12.5px;color:var(--ui-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+  #seek{flex:1;min-width:90px;height:4px;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.18);border-radius:3px;cursor:pointer}
+  #seek::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer}
+  #seek::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:var(--accent);cursor:pointer}
+  #time{font-size:11px;color:var(--ui-dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .bars{display:flex;gap:2px;align-items:flex-end;height:22px;width:46px}
+  .bars i{flex:1;background:linear-gradient(#7fd8ff,#c69bff);border-radius:1px;height:10%}
+  #newSong{font-size:11.5px;color:var(--ui-dim);cursor:pointer;text-decoration:underline;white-space:nowrap}
+  #newSong:hover{color:var(--ui-fg)}
+  .hint{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:15;font-size:11.5px;color:var(--ui-dim);
+    background:var(--ui-bg);border:1px solid var(--ui-border);border-radius:20px;padding:5px 14px;backdrop-filter:blur(10px);
+    opacity:0;transition:opacity .5s}
+  .hint.show{opacity:1}
+</style>
+
+<canvas id="stage"></canvas>
+
+<div id="intro">
+  <h1>Audioscape</h1>
+  <p>Upload a song and watch it grow into a living world. Bass sculpts the terrain, vocals bloom into flowers, highs ignite the stars, and the melody paints the whole palette. No two songs make the same picture.</p>
+  <label class="drop" id="drop">
+    <div style="font-size:30px">🎵</div>
+    <div class="big">Drop an audio file or click to choose</div>
+    <div class="sub">mp3 · wav · ogg · m4a · flac — stays on your device</div>
+    <input id="file" type="file" accept="audio/*" hidden>
+  </label>
+  <div class="legend">
+    <span><i style="background:#8b6b4a"></i>Bass → terrain</span>
+    <span><i style="background:#ff9ecb"></i>Vocals → flowers</span>
+    <span><i style="background:#ffffff"></i>Highs → stars</span>
+    <span><i style="background:#7fd8ff"></i>Melody → palette</span>
+    <span><i style="background:#63e6be"></i>Flow → rivers</span>
+  </div>
+</div>
+
+<div class="hint" id="hint">✦ each song generates its own unique world · space = pause</div>
+
+<div id="hud">
+  <button id="play" title="Play / pause">⏸</button>
+  <div class="bars" id="vu"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div style="display:flex;flex-direction:column;gap:3px;min-width:120px">
+    <span id="trackName">—</span>
+    <input id="seek" type="range" min="0" max="1000" value="0">
+  </div>
+  <span id="time">0:00 / 0:00</span>
+  <span id="newSong">new song</span>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  // ============================================================= SETUP
+  const cvs = document.getElementById('stage');
+  const ctx = cvs.getContext('2d', { alpha:false });
+  let W=0,H=0,DPR=1;
+  function resize(){
+    DPR = Math.min(2, window.devicePixelRatio||1);
+    W = cvs.width  = Math.floor(innerWidth  * DPR);
+    H = cvs.height = Math.floor(innerHeight * DPR);
+    cvs.style.width = innerWidth+'px';
+    cvs.style.height = innerHeight+'px';
+  }
+  addEventListener('resize', resize); resize();
+
+  // ============================================================= SEEDED RNG
+  // Each song derives a deterministic seed → unique-but-repeatable world.
+  function xmur3(str){
+    let h=1779033703 ^ str.length;
+    for(let i=0;i<str.length;i++){ h=Math.imul(h ^ str.charCodeAt(i),3432918353); h=h<<13|h>>>19; }
+    return ()=>{ h=Math.imul(h ^ h>>>16,2246822507); h=Math.imul(h ^ h>>>13,3266489909); return (h ^= h>>>16)>>>0; };
+  }
+  function sfc32(a,b,c,d){
+    return ()=>{ a>>>=0;b>>>=0;c>>>=0;d>>>=0; let t=(a+b|0)+d|0; d=d+1|0; a=b ^ b>>>9; b=c+(c<<3)|0; c=(c<<21|c>>>11); c=c+t|0; return (t>>>0)/4294967296; };
+  }
+  let rnd = Math.random;
+  function seedWorld(str){
+    const s = xmur3(str);
+    rnd = sfc32(s(),s(),s(),s());
+    for(let i=0;i<15;i++) rnd();
+  }
+  const rr=(a,b)=> a + (b-a)*rnd();
+  const ri=(a,b)=> Math.floor(rr(a,b+1));
+  const pick=arr=> arr[Math.floor(rnd()*arr.length)];
+
+  // ============================================================= AUDIO
+  let AC, analyser, srcNode, mediaEl, freq, time, sampleRate;
+  const NBIN = 1024;
+  let audioReady=false;
+
+  function setupAudio(el){
+    if(!AC){ AC = new (window.AudioContext||window.webkitAudioContext)(); }
+    if(srcNode) try{ srcNode.disconnect(); }catch(e){}
+    analyser = AC.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.8;
+    freq = new Uint8Array(analyser.frequencyBinCount);
+    time = new Uint8Array(analyser.fftSize);
+    srcNode = AC.createMediaElementSource(el);
+    srcNode.connect(analyser);
+    analyser.connect(AC.destination);
+    sampleRate = AC.sampleRate;
+    audioReady = true;
+  }
+  // Map a frequency (Hz) to an analyser bin index
+  function hz2bin(hz){ return Math.round(hz / (sampleRate/2) * analyser.frequencyBinCount); }
+  function bandAvg(loHz, hiHz){
+    const a=hz2bin(loHz), b=Math.min(analyser.frequencyBinCount-1, hz2bin(hiHz));
+    let s=0,n=0; for(let i=a;i<=b;i++){ s+=freq[i]; n++; }
+    return n? s/n/255 : 0;
+  }
+
+  // ============================================================= WORLD STATE
+  let palette, terrain, trees=[], flowers=[], stars=[], particles=[], rivers=[], galaxy, petals=[];
+  let smBass=0, smLowMid=0, smVocal=0, smPresence=0, smHigh=0, smOverall=0;
+  let bassEnv=0, bassPrev=0, vocalEnv=0, vocalPrev=0, highPrev=0;
+  let centroidHz=800, smCentroid=800;
+  let baseHue=200, hueDrift=0;
+  let t=0;               // frame time
+  let flash=0;           // beat flash
+  let running=false;
+
+  // ---- Palette derived from melody (spectral centroid → hue) ----
+  function makePalette(seedHue){
+    baseHue = seedHue;
+    const scheme = pick(['analogous','complementary','triadic','split']);
+    let hues;
+    switch(scheme){
+      case 'complementary': hues=[0,180]; break;
+      case 'triadic':       hues=[0,120,240]; break;
+      case 'split':         hues=[0,150,210]; break;
+      default:              hues=[-30,0,35,60];
+    }
+    const sat = ri(55,80), light = ri(45,62);
+    palette = {
+      scheme, hues, sat, light,
+      accent(h,l,a=1){ return `hsla(${(baseHue+h)%360},${sat}%,${l}%,${a})`; },
+      sky:[ ri(210,280), ri(180,250) ], // two hues for sky gradient
+      terrain: ri(15,45),               // earthy hue offset
+    };
+  }
+
+  // ---- Galaxy: a swirl of stars + nebula clouds in the sky ----
+  function makeGalaxy(){
+    const cx = rr(0.25,0.75), cy = rr(0.12,0.4);
+    const arms = ri(2,5);
+    const g={ cx, cy, arms, rot:rr(0,6.28), spin:rr(-0.02,0.02), stars:[], nebula:[] };
+    const n = 420;
+    for(let i=0;i<n;i++){
+      const arm = i % arms;
+      const dist = Math.pow(rnd(),0.6);
+      const ang = arm*(6.283/arms) + dist*rr(2.5,4.5) + rr(-0.25,0.25);
+      g.stars.push({ d:dist, a:ang, sz:rr(0.4,2.0), tw:rr(0,6.28), ts:rr(1,3), hue:rr(-40,40) });
+    }
+    for(let i=0;i<7;i++){
+      g.nebula.push({ d:rr(0.1,0.9), a:rr(0,6.28), r:rr(60,180), hue:rr(-60,60), a2:rr(0.03,0.10) });
+    }
+    galaxy=g;
+  }
+
+  // ---- Terrain: layered ridgelines shaped by bass ----
+  function makeTerrain(){
+    const layers=[];
+    const N=6;
+    for(let L=0;L<N;L++){
+      const pts=[];
+      const cnt = 10 + L*4;
+      const baseY = 0.55 + L*0.075;
+      const amp = (0.05 + L*0.02);
+      for(let i=0;i<=cnt;i++){
+        pts.push({ n:rr(0,6.28), sp:rr(0.3,1.1), a:rr(0.5,1)*amp });
+      }
+      layers.push({ pts, baseY, amp, hueOff:L*6, dark:0.25 + L*0.11 });
+    }
+    terrain = { layers, N };
+  }
+  function terrainHeightAt(px, L, tt){ // returns y in [0,1]
+    const layer = terrain.layers[L];
+    const pts = layer.pts;
+    const f = px*(pts.length-1);
+    const i = Math.floor(f), frac=f-i;
+    const p0=pts[Math.max(0,i)], p1=pts[Math.min(pts.length-1,i+1)];
+    const w0 = Math.sin(p0.n + tt*p0.sp)*p0.a;
+    const w1 = Math.sin(p1.n + tt*p1.sp)*p1.a;
+    const s = frac*frac*(3-2*frac);
+    const wave = w0+(w1-w0)*s;
+    return layer.baseY + wave - bassEnv*(0.10 + L*0.03);
+  }
+
+  // ---- Rivers: sinuous flowing bands across terrain ----
+  function makeRivers(){
+    rivers=[];
+    const n = ri(1,2);
+    for(let k=0;k<n;k++){
+      rivers.push({
+        y: rr(0.62,0.82), amp: rr(0.01,0.03), freq: rr(1.5,3.5),
+        phase: rr(0,6.28), width: rr(0.015,0.04), speed: rr(0.2,0.6),
+        hue: rr(180,210)
+      });
+    }
+  }
+
+  // ---- Stars / particle field in the sky ----
+  function makeStars(){
+    stars=[];
+    const n = 260;
+    for(let i=0;i<n;i++){
+      stars.push({ x:rnd(), y:rr(0,0.62), z:rr(0.2,1), tw:rr(0,6.28), band:ri(0,8), on:0 });
+    }
+  }
+  function makeAmbientParticles(){
+    particles=[];
+    for(let i=0;i<120;i++){
+      particles.push({ x:rnd(), y:rnd(), vx:rr(-0.02,0.02), vy:rr(-0.05,-0.005),
+        life:rr(0,1), sz:rr(0.6,2.4), hue:rr(-40,40), spark:false });
+    }
+  }
+
+  // ---- Tree generation (recursive, drawn to offscreen once per tree) ----
+  function makeTree(x, groundY, scale, hueOff){
+    const branches=[];
+    const depth = ri(7,10);
+    const spread = rr(0.35,0.6);
+    const len0 = rr(0.10,0.16)*scale;
+    (function grow(x0,y0,ang,len,d){
+      if(d>depth || len<0.002) return;
+      const x1 = x0 + Math.cos(ang)*len;
+      const y1 = y0 + Math.sin(ang)*len;
+      branches.push({x0,y0,x1,y1,w:Math.max(0.6, d? (depth-d)*0.6 : depth*0.8), d});
+      const nb = d<2?2: (rnd()<0.82?2:1);
+      for(let i=0;i<nb;i++){
+        const da = (i? spread : -spread)*rr(0.6,1.3) + rr(-0.12,0.12);
+        grow(x1,y1, ang+da, len*rr(0.68,0.8), d+1);
+      }
+    })(x, groundY, -Math.PI/2 + rr(-0.15,0.15), len0, 0);
+    return { x, groundY, branches, hueOff, depth, bloom:rr(0.4,1), sway:rr(0,6.28), swayA:rr(0.6,1.4) };
+  }
+  function plantTrees(){
+    trees=[];
+    const n = ri(4,8);
+    for(let i=0;i<n;i++){
+      const x = (i+0.5)/n + rr(-0.05,0.05);
+      const gy = 0.7 + rr(0,0.12);
+      trees.push(makeTree(x, gy, rr(0.7,1.25), rr(-15,25)));
+    }
+    trees.sort((a,b)=>a.groundY-b.groundY);
+  }
+
+  // ---- Flowers (spawned by vocals) ----
+  function spawnFlower(x,y,intensity){
+    if(flowers.length>240) flowers.shift();
+    const petalsN = ri(5,9);
+    flowers.push({
+      x,y, grow:0, target:rr(0.6,1)*(0.5+intensity),
+      petals:petalsN, hue: rr(-30,40), size: rr(0.012,0.026)*(0.6+intensity),
+      rot: rr(0,6.28), spin: rr(-0.5,0.5), sway:rr(0,6.28), born:t, life: rr(600,1400)
+    });
+  }
+  function spawnPetal(x,y,hue){
+    if(petals.length>200) petals.shift();
+    petals.push({ x,y, vx:rr(-0.02,0.02), vy:rr(-0.01,0.02), rot:rr(0,6.28),
+      spin:rr(-0.1,0.1), hue, life:1, sz:rr(0.004,0.009) });
+  }
+
+  // ============================================================= BUILD WORLD
+  let songLabel='';
+  function buildWorld(seedStr){
+    songLabel = seedStr;
+    seedWorld(seedStr);
+    const seedHue = ri(0,360);
+    makePalette(seedHue);
+    makeGalaxy();
+    makeTerrain();
+    makeRivers();
+    makeStars();
+    makeAmbientParticles();
+    plantTrees();
+    flowers=[]; petals=[];
+    smBass=smVocal=smHigh=smOverall=bassEnv=vocalEnv=0;
+    hueDrift=0; t=0;
+  }
+
+  // ============================================================= RENDER
+  function px(x){ return x*W; }
+  function py(y){ return y*H; }
+
+  function draw(){
+    t += 1;
+    // ---- analyse ---- (all zero until a song is loaded → idle world still renders)
+    let bass=0, lowmid=0, vocal=0, presence=0, high=0, overall=0;
+    if(audioReady){
+      if(running){
+        analyser.getByteFrequencyData(freq);
+        analyser.getByteTimeDomainData(time);
+      }
+      // frequency bands (Hz)
+      bass    = bandAvg(20,140);
+      lowmid  = bandAvg(140,400);
+      vocal   = bandAvg(300,2000);   // vocal / melody body
+      presence= bandAvg(2000,5000);
+      high    = bandAvg(5000,16000);
+      for(let i=0;i<freq.length;i++) overall+=freq[i]; overall/= (freq.length*255);
+
+      // spectral centroid → drives palette hue (melody color)
+      let num=0,den=0;
+      for(let i=1;i<freq.length;i+=2){ const m=freq[i]; num += i*m; den += m; }
+      const centBin = den? num/den : 40;
+      centroidHz = centBin*(sampleRate/2)/analyser.frequencyBinCount || centroidHz;
+    }
+    smCentroid += (centroidHz - smCentroid)*0.03;
+
+    // smoothing / envelopes
+    smBass    += (bass-smBass)*0.25;
+    smLowMid  += (lowmid-smLowMid)*0.2;
+    smVocal   += (vocal-smVocal)*0.2;
+    smPresence+= (presence-smPresence)*0.25;
+    smHigh    += (high-smHigh)*0.3;
+    smOverall += (overall-smOverall)*0.1;
+
+    bassEnv = Math.max(bassEnv*0.90, smBass);
+    // beat / bass hit detection → flash + terrain punch
+    const bassHit = smBass - bassPrev;
+    if(bassHit>0.045 && smBass>0.35){ flash = Math.min(1, flash+0.5); }
+    bassPrev = smBass;
+
+    // vocal onset → spawn flowers
+    const vocalHit = smVocal - vocalPrev;
+    if(smVocal>0.28 && vocalHit>0.03){
+      const count = 1+Math.floor(smVocal*3);
+      for(let i=0;i<count;i++){
+        const x=rr(0.06,0.94);
+        const gy = groundYAt(x);
+        spawnFlower(x, gy-rr(0,0.02), smVocal);
+      }
+    }
+    vocalPrev = smVocal;
+    highPrev = smHigh;
+
+    // melody drift: shift base hue slowly toward centroid-mapped hue
+    const targetHue = (Math.log2(Math.max(80,smCentroid)/80)/7)*300; // 0..~300
+    hueDrift += (targetHue - hueDrift)*0.01;
+    baseHue = (palette._seed = baseHue); // keep
+    const dynHue = ( (paletteSeedHue + hueDrift) %360 + 360)%360;
+    baseHue = dynHue;
+
+    flash *= 0.90;
+    const tt = t*0.01;
+
+    // ================= SKY =================
+    const skyTop = `hsl(${(baseHue+ palette.sky[0])%360}, 45%, ${8+smOverall*10}%)`;
+    const skyBot = `hsl(${(baseHue+ palette.sky[1])%360}, 55%, ${16+smOverall*14}%)`;
+    const g = ctx.createLinearGradient(0,0,0,H*0.75);
+    g.addColorStop(0, skyTop);
+    g.addColorStop(1, skyBot);
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+    // subtle beat flash bloom
+    if(flash>0.01){
+      const fg=ctx.createRadialGradient(W*0.5,H*0.35,0,W*0.5,H*0.35,H*0.7);
+      fg.addColorStop(0, palette.accent(0, 70, 0.10*flash));
+      fg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle=fg; ctx.fillRect(0,0,W,H);
+    }
+
+    drawGalaxy(tt);
+    drawStars();
+    drawTerrain(tt);
+    drawRivers(tt);
+    drawTrees(tt);
+    drawFlowers();
+    drawPetals();
+    drawParticles(high, presence);
+    updateVU();
+
+    requestAnimationFrame(draw);
+  }
+
+  // groundY (front terrain surface) at normalized x
+  function groundYAt(x){
+    // use last visible layer ~ where flowers sit
+    return terrainHeightAt(x, 2, t*0.01) + 0.02;
+  }
+
+  function drawGalaxy(tt){
+    const G=galaxy; G.rot += G.spin;
+    const cx=px(G.cx), cy=py(G.cy);
+    const R = Math.min(W,H)*0.42*(0.85+smOverall*0.4);
+    // nebula clouds
+    ctx.globalCompositeOperation='lighter';
+    for(const n of G.nebula){
+      const a=n.a+G.rot;
+      const nx=cx+Math.cos(a)*n.d*R*0.6, ny=cy+Math.sin(a)*n.d*R*0.5;
+      const rg=ctx.createRadialGradient(nx,ny,0,nx,ny,n.r*DPR*(1+smHigh*0.5));
+      rg.addColorStop(0, `hsla(${(baseHue+n.hue)%360},70%,60%,${n.a2*(0.6+smOverall)})`);
+      rg.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(nx,ny,n.r*DPR*1.6,0,6.283); ctx.fill();
+    }
+    // arm stars
+    for(const s of G.stars){
+      const a=s.a+G.rot;
+      const d=s.d*R;
+      const sx=cx+Math.cos(a)*d, sy=cy+Math.sin(a)*d*0.62;
+      const tw=0.6+0.4*Math.sin(tt*s.ts+s.tw);
+      const bright = tw*(0.5+smHigh*0.8);
+      ctx.fillStyle=`hsla(${(baseHue+s.hue)%360},80%,${70}%,${0.35+bright*0.6})`;
+      const r=s.sz*DPR*(0.8+smHigh);
+      ctx.beginPath(); ctx.arc(sx,sy,r,0,6.283); ctx.fill();
+    }
+    // bright core
+    const core=ctx.createRadialGradient(cx,cy,0,cx,cy,R*0.28);
+    core.addColorStop(0,`hsla(${(baseHue+40)%360},60%,90%,${0.5+smOverall*0.3})`);
+    core.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=core; ctx.beginPath(); ctx.arc(cx,cy,R*0.28,0,6.283); ctx.fill();
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  function drawStars(){
+    ctx.globalCompositeOperation='lighter';
+    for(const s of stars){
+      // highs make stars flare; each star reacts to a frequency band
+      const bandE = [smHigh,smPresence,smVocal][s.band%3];
+      const react = s.band>=3 ? smHigh : smPresence;
+      s.on += (( (smHigh*1.4) - s.on))*0.15;
+      const tw = 0.5+0.5*Math.sin(t*0.05*s.tw + s.tw);
+      const b = (0.15 + s.z*0.4)*(0.5+tw*0.5) + smHigh*1.3*s.z;
+      const r = (0.5 + s.z*1.6)*DPR*(1+smHigh*2.2*s.z);
+      const x=px(s.x), y=py(s.y);
+      ctx.fillStyle=`hsla(${(baseHue+60)%360},40%,95%,${Math.min(1,b)})`;
+      ctx.beginPath(); ctx.arc(x,y,r,0,6.283); ctx.fill();
+      // sparkle cross on strong highs
+      if(smHigh>0.5 && s.z>0.7){
+        ctx.strokeStyle=`hsla(${(baseHue+60)%360},50%,95%,${(smHigh-0.4)*0.5})`;
+        ctx.lineWidth=DPR*0.6;
+        ctx.beginPath();
+        ctx.moveTo(x-r*3,y);ctx.lineTo(x+r*3,y);
+        ctx.moveTo(x,y-r*3);ctx.lineTo(x,y+r*3);
+        ctx.stroke();
+      }
+    }
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  function drawTerrain(tt){
+    for(let L=terrain.N-1; L>=0; L--){
+      const layer=terrain.layers[L];
+      ctx.beginPath();
+      ctx.moveTo(0,H);
+      const steps=64;
+      for(let i=0;i<=steps;i++){
+        const x=i/steps;
+        const y=terrainHeightAt(x,L,tt);
+        ctx.lineTo(px(x),py(y));
+      }
+      ctx.lineTo(W,H); ctx.closePath();
+      const near = L/(terrain.N-1);
+      const light = 8 + near*18 + smBass*10*(1-near);
+      const hue = (baseHue + palette.terrain + layer.hueOff)%360;
+      const grd=ctx.createLinearGradient(0,py(layer.baseY-0.1),0,H);
+      grd.addColorStop(0,`hsl(${hue},${28+near*20}%,${light+6}%)`);
+      grd.addColorStop(1,`hsl(${hue},${24+near*16}%,${Math.max(4,light-4)}%)`);
+      ctx.fillStyle=grd; ctx.fill();
+    }
+  }
+
+  function drawRivers(tt){
+    ctx.globalCompositeOperation='lighter';
+    ctx.lineJoin='round'; ctx.lineCap='round';
+    for(const r of rivers){
+      // Lazy meander: two low-frequency sines, no sharp terrain-following.
+      const steps=80;
+      const pts=[];
+      for(let i=0;i<=steps;i++){
+        const x=i/steps;
+        const y = r.y
+          + Math.sin(x*r.freq*1.6 + tt*r.speed*6 + r.phase)*r.amp
+          + Math.sin(x*r.freq*0.7 + tt*r.speed*3 + r.phase*1.7)*r.amp*0.5;
+        pts.push([px(x),py(y)]);
+      }
+      // Smooth the polyline with midpoint quadratic curves.
+      const path=new Path2D();
+      path.moveTo(pts[0][0],pts[0][1]);
+      for(let i=1;i<pts.length-1;i++){
+        const mx=(pts[i][0]+pts[i+1][0])/2, my=(pts[i][1]+pts[i+1][1])/2;
+        path.quadraticCurveTo(pts[i][0],pts[i][1],mx,my);
+      }
+      path.lineTo(pts[pts.length-1][0],pts[pts.length-1][1]);
+
+      const w = (r.width + smLowMid*0.02)*H;
+      const hue=(r.hue + palette.sky[0])%360;
+      // soft outer glow
+      ctx.lineWidth=w*1.8;
+      ctx.strokeStyle=`hsla(${hue},70%,${50+smOverall*20}%,0.10)`;
+      ctx.stroke(path);
+      // main body
+      ctx.lineWidth=w;
+      ctx.strokeStyle=`hsla(${hue},70%,${55+smOverall*20}%,0.28)`;
+      ctx.stroke(path);
+      // shimmer highlight
+      ctx.lineWidth=w*0.35;
+      ctx.strokeStyle=`hsla(${(baseHue+60)%360},60%,90%,${0.10+smHigh*0.3})`;
+      ctx.stroke(path);
+    }
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  function drawTrees(tt){
+    for(const tr of trees){
+      const sway = Math.sin(tt*tr.swayA + tr.sway)*(0.01+smLowMid*0.03);
+      const gy = groundYAt(tr.x);
+      ctx.save();
+      ctx.translate(px(tr.x), py(gy));
+      const sc = Math.min(W,H)* (0.9);
+      // trunk hue
+      const hue=(baseHue+palette.terrain+tr.hueOff)%360;
+      for(const b of tr.branches){
+        const bend = sway * (b.d/tr.depth) * ((b.y0)); // upper branches sway more
+        ctx.beginPath();
+        ctx.moveTo((b.x0-tr.x)*sc + bend*sc*0.3, (b.y0-tr.groundY)*sc);
+        ctx.lineTo((b.x1-tr.x)*sc + bend*sc, (b.y1-tr.groundY)*sc);
+        const l = 20 + b.d*4 + smBass*8;
+        ctx.strokeStyle=`hsl(${hue},${35}%,${Math.min(60,l)}%)`;
+        ctx.lineWidth=Math.max(0.5, b.w*DPR* (Math.min(W,H)/900));
+        ctx.lineCap='round';
+        ctx.stroke();
+      }
+      // canopy blossoms at branch tips — pulse with vocals/presence
+      const leafHue=(baseHue + palette.hues[1%palette.hues.length])%360;
+      for(const b of tr.branches){
+        if(b.d < tr.depth-2) continue;
+        const bend = sway * (b.d/tr.depth);
+        const x=(b.x1-tr.x)*sc + bend*sc, y=(b.y1-tr.groundY)*sc;
+        const r=(2.5 + smVocal*6 + smPresence*4)*DPR*tr.bloom*(Math.min(W,H)/900);
+        ctx.fillStyle=`hsla(${leafHue},70%,${60+smVocal*15}%,${0.5+smPresence*0.4})`;
+        ctx.beginPath(); ctx.arc(x,y,r,0,6.283); ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawFlowers(){
+    for(let k=flowers.length-1;k>=0;k--){
+      const f=flowers[k];
+      f.grow += (f.target - f.grow)*0.06;
+      f.rot += f.spin*0.01;
+      const age = t-f.born;
+      let fade=1;
+      if(age>f.life){ fade = Math.max(0, 1-(age-f.life)/120); if(fade<=0){ flowers.splice(k,1); continue; } }
+      const sway=Math.sin(t*0.02+f.sway)*0.004;
+      const cx=px(f.x+sway), cy=py(f.y);
+      const R=f.size*Math.min(W,H)*f.grow;
+      const hue=(baseHue+ palette.hues[2%palette.hues.length] + f.hue)%360;
+      // stem
+      ctx.strokeStyle=`hsla(${(baseHue+120)%360},45%,40%,${0.6*fade})`;
+      ctx.lineWidth=DPR*1.2*(Math.min(W,H)/900);
+      ctx.beginPath(); ctx.moveTo(cx,cy+R*3); ctx.lineTo(cx,cy); ctx.stroke();
+      // petals
+      for(let i=0;i<f.petals;i++){
+        const a=f.rot + i/f.petals*6.283;
+        const petalPulse = 1 + smVocal*0.25*Math.sin(t*0.1+i);
+        const petX=cx+Math.cos(a)*R*0.9*petalPulse, petY=cy+Math.sin(a)*R*0.9*petalPulse;
+        ctx.fillStyle=`hsla(${hue},75%,${62}%,${0.85*fade})`;
+        ctx.beginPath();
+        ctx.ellipse(petX,petY,R*0.55,R*0.28,a,0,6.283);
+        ctx.fill();
+      }
+      // center
+      ctx.fillStyle=`hsla(${(hue+40)%360},85%,60%,${fade})`;
+      ctx.beginPath(); ctx.arc(cx,cy,R*0.42,0,6.283); ctx.fill();
+
+      // shed petals occasionally on beats
+      if(flash>0.4 && rnd()<0.02) spawnPetal(f.x, f.y, hue);
+    }
+  }
+
+  function drawPetals(){
+    for(let k=petals.length-1;k>=0;k--){
+      const p=petals[k];
+      p.x+=p.vx*0.01+ (smLowMid*0.004); p.y+=p.vy*0.01; p.vy+=0.0004; p.rot+=p.spin;
+      p.life-=0.004;
+      if(p.life<=0){ petals.splice(k,1); continue; }
+      const x=px(p.x), y=py(p.y);
+      ctx.save(); ctx.translate(x,y); ctx.rotate(p.rot);
+      ctx.fillStyle=`hsla(${p.hue},75%,65%,${p.life})`;
+      ctx.beginPath(); ctx.ellipse(0,0,p.sz*Math.min(W,H),p.sz*Math.min(W,H)*0.5,0,0,6.283); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawParticles(high, presence){
+    ctx.globalCompositeOperation='lighter';
+    for(const p of particles){
+      p.x+=p.vx*0.01 + Math.sin(t*0.01+p.hue)*0.0004;
+      p.y+=p.vy*0.01 - smBass*0.002;
+      p.life-=0.003;
+      if(p.y<-0.02||p.life<=0){ p.x=rnd(); p.y=rr(0.9,1.05); p.life=1; p.vy=rr(-0.05,-0.01); }
+      const x=px(p.x), y=py(p.y);
+      const r=p.sz*DPR*(0.6+smHigh*2);
+      ctx.fillStyle=`hsla(${(baseHue+60+p.hue)%360},60%,85%,${0.15+smPresence*0.5})`;
+      ctx.beginPath(); ctx.arc(x,y,r,0,6.283); ctx.fill();
+    }
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  // ============================================================= VU meter
+  const vuBars=[...document.querySelectorAll('#vu i')];
+  function updateVU(){
+    if(!audioReady) return;
+    const bands=[smBass,smLowMid,smVocal,smVocal,smPresence,smPresence,smHigh,smHigh];
+    for(let i=0;i<vuBars.length;i++){
+      vuBars[i].style.height = Math.max(8, bands[i]*100)+'%';
+    }
+  }
+
+  // ============================================================= UI / PLAYBACK
+  let paletteSeedHue=200;
+  // store the seed hue separately so melody drift is relative to it
+  const _makePalette = makePalette;
+  makePalette = function(h){ paletteSeedHue=h; _makePalette(h); };
+
+  const intro=document.getElementById('intro');
+  const drop=document.getElementById('drop');
+  const fileInput=document.getElementById('file');
+  const hud=document.getElementById('hud');
+  const hint=document.getElementById('hint');
+  const playBtn=document.getElementById('play');
+  const seek=document.getElementById('seek');
+  const timeEl=document.getElementById('time');
+  const trackName=document.getElementById('trackName');
+
+  function fmt(s){ s=Math.max(0,s|0); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+
+  function loadFile(file){
+    if(!file) return;
+    if(mediaEl){ mediaEl.pause(); URL.revokeObjectURL(mediaEl.src); }
+    mediaEl = new Audio();
+    mediaEl.src = URL.createObjectURL(file);
+    mediaEl.crossOrigin='anonymous';
+    trackName.textContent = file.name.replace(/\.[^.]+$/,'');
+
+    // seed the world from the filename + size → unique deterministic art
+    buildWorld(file.name + '|' + file.size + '|' + (file.lastModified||0));
+
+    mediaEl.addEventListener('loadedmetadata', ()=>{
+      setupAudio(mediaEl);
+      if(AC.state==='suspended') AC.resume();
+      mediaEl.play().then(()=>{ running=true; playBtn.textContent='⏸'; }).catch(()=>{});
+    }, { once:true });
+
+    mediaEl.addEventListener('timeupdate', ()=>{
+      if(mediaEl.duration){
+        seek.value = (mediaEl.currentTime/mediaEl.duration*1000)|0;
+        timeEl.textContent = fmt(mediaEl.currentTime)+' / '+fmt(mediaEl.duration);
+      }
+    });
+    mediaEl.addEventListener('ended', ()=>{ playBtn.textContent='▶'; running=false; });
+
+    intro.classList.add('hidden');
+    hud.classList.add('show');
+    hint.classList.add('show');
+    setTimeout(()=>hint.classList.remove('show'), 6000);
+  }
+
+  drop.addEventListener('click', ()=>fileInput.click());
+  fileInput.addEventListener('change', e=> loadFile(e.target.files[0]));
+  ['dragover','dragenter'].forEach(ev=> drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(ev=> drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.remove('drag'); }));
+  drop.addEventListener('drop', e=> loadFile(e.dataTransfer.files[0]));
+  // allow dropping anywhere once started
+  addEventListener('dragover', e=>e.preventDefault());
+  addEventListener('drop', e=>{ e.preventDefault(); if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
+
+  playBtn.addEventListener('click', togglePlay);
+  function togglePlay(){
+    if(!mediaEl) return;
+    if(mediaEl.paused){ if(AC&&AC.state==='suspended')AC.resume(); mediaEl.play(); running=true; playBtn.textContent='⏸'; }
+    else { mediaEl.pause(); running=false; playBtn.textContent='▶'; }
+  }
+  seek.addEventListener('input', ()=>{ if(mediaEl&&mediaEl.duration) mediaEl.currentTime = seek.value/1000*mediaEl.duration; });
+  document.getElementById('newSong').addEventListener('click', ()=>{ intro.classList.remove('hidden'); });
+  addEventListener('keydown', e=>{ if(e.code==='Space'){ e.preventDefault(); togglePlay(); } });
+
+  // build an idle world so the canvas isn't blank behind the intro
+  buildWorld('audioscape-idle-'+Math.random());
+  requestAnimationFrame(draw);
+})();
+</script>
