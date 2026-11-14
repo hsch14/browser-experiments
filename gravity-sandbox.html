@@ -170,6 +170,10 @@
   <div class="toggle on" id="tg-trails"><div class="switch"></div><span>Trails</span></div>
   <div class="toggle on" id="tg-glow"><div class="switch"></div><span>Glow</span></div>
   <div class="abtn" id="demo">Load demo system</div>
+  <div class="title" style="margin-top:8px;">Space Presets</div>
+  <div class="abtn" id="preset-solar">Solar System</div>
+  <div class="abtn" id="preset-binary">Binary Stars</div>
+  <div class="abtn" id="preset-blackhole">Black Hole System</div>
   <div class="abtn danger" id="clear">Clear all</div>
 </div>
 
@@ -772,7 +776,140 @@ function loadDemo() {
   hideHint();
 }
 
-// ---------- Main loop ----------
+// ---------- Custom space presets ----------
+function resetPresetScene() {
+  bodies = [];
+  particles = [];
+  setSpeed(1);
+
+  cam.x = W / 2;
+  cam.y = H / 2;
+  cam.scale = clamp((Math.min(W, H) - 140) / 1040, MIN_SCALE, 1);
+  updateZoomLabel();
+  hideHint();
+}
+
+function createPresetBody(type, x, y, vx, vy, mass, color) {
+  const b = new Body(x, y, vx, vy, type);
+
+  if (mass !== undefined) {
+    b.mass = mass;
+    b.r = radiusForMass(mass);
+  }
+
+  if (color) b.color = color;
+
+  bodies.push(b);
+  return b;
+}
+
+function addPresetOrbit(center, radius, angle, mass, color) {
+  const x = center.x + Math.cos(angle) * radius;
+  const y = center.y + Math.sin(angle) * radius;
+  const v = Math.sqrt(G * (center.mass + mass) / radius);
+
+  return createPresetBody(
+    "planet", x, y,
+    center.vx - Math.sin(angle) * v,
+    center.vy + Math.cos(angle) * v,
+    mass, color
+  );
+}
+
+function balancePresetMomentum() {
+  let px = 0, py = 0, totalMass = 0;
+
+  for (const b of bodies) {
+    px += b.mass * b.vx;
+    py += b.mass * b.vy;
+    totalMass += b.mass;
+  }
+
+  if (totalMass === 0) return;
+
+  for (const b of bodies) {
+    b.vx -= px / totalMass;
+    b.vy -= py / totalMass;
+  }
+}
+
+// Preset 1: Stylized Solar System
+function loadSolarPreset() {
+  resetPresetScene();
+
+  const sun = createPresetBody(
+    "star", W / 2, H / 2, 0, 0,
+    520, [255, 210, 95]
+  );
+
+  addPresetOrbit(sun, 100, 0.3, 10, [120, 185, 255]);
+  addPresetOrbit(sun, 165, 2.3, 15, [235, 115, 95]);
+  addPresetOrbit(sun, 250, 4.1, 25, [240, 200, 130]);
+  addPresetOrbit(sun, 350, 5.5, 35, [125, 225, 240]);
+
+  balancePresetMomentum();
+}
+
+// Preset 2: Binary Stars
+function loadBinaryPreset() {
+  resetPresetScene();
+
+  const cx = W / 2, cy = H / 2;
+  const mass = 520;
+  const separation = 180;
+  const v = Math.sqrt(G * mass / (2 * separation));
+
+  createPresetBody(
+    "star", cx - separation / 2, cy,
+    0, -v, mass, [255, 205, 115]
+  );
+
+  createPresetBody(
+    "star", cx + separation / 2, cy,
+    0, v, mass, [160, 190, 255]
+  );
+
+  const r = 480, a = 1.0;
+  const planetSpeed = Math.sqrt(G * (2 * mass + 12) / r);
+
+  createPresetBody(
+    "planet",
+    cx + Math.cos(a) * r,
+    cy + Math.sin(a) * r,
+    -Math.sin(a) * planetSpeed,
+    Math.cos(a) * planetSpeed,
+    12, [115, 245, 220]
+  );
+
+  balancePresetMomentum();
+}
+
+// Preset 3: Black Hole System
+function loadBlackHolePreset() {
+  resetPresetScene();
+
+  const hole = createPresetBody(
+    "blackhole", W / 2, H / 2,
+    0, 0, 7000, [190, 100, 255]
+  );
+
+  addPresetOrbit(hole, 250, 0.4, 12, [255, 110, 120]);
+  addPresetOrbit(hole, 340, 2.2, 18, [110, 205, 255]);
+  addPresetOrbit(hole, 430, 4.3, 25, [255, 210, 100]);
+
+  balancePresetMomentum();
+}
+
+// Connect preset buttons
+document.getElementById("preset-solar")
+  .addEventListener("click", loadSolarPreset);
+
+document.getElementById("preset-binary")
+  .addEventListener("click", loadBinaryPreset);
+
+document.getElementById("preset-blackhole")
+  .addEventListener("click", loadBlackHolePreset);
+  // ---------- Main loop ----------
 function loop() {
   stepPhysics();
   stepParticles();
