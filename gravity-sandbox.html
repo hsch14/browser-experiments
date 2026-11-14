@@ -236,7 +236,7 @@ let particles = [];
 const stars = [];
 function buildStars() {
   stars.length = 0;
-  const n = Math.round((W * H) / 4200);
+  const n = Math.round((W * H) / 2000);
   for (let i = 0; i < n; i++) {
     stars.push({ x: Math.random()*W, y: Math.random()*H, r: Math.random()*1.2 + 0.2, t: Math.random()*6, s: Math.random()*0.9 + 0.3 });
   }
@@ -353,7 +353,7 @@ function stepPhysics() {
   if (opts.trails) {
     for (const b of bodies) {
       b.trail.push(b.x, b.y);
-      const maxLen = b.type === "blackhole" ? 90 : b.type === "star" ? 70 : 120;
+      const maxLen = b.type === "blackhole" ? 180 : b.type === "star" ? 140 : 240;
       while (b.trail.length > maxLen * 2) b.trail.splice(0, 2);
     }
   }
