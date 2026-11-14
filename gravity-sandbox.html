@@ -435,6 +435,9 @@ for (let k = 0; k < burst; k++) {
 if (particles.length > 600) {
   particles.splice(0, particles.length - 600);
 }
+} // merge 함수 종료
+
+function stepPhysics() {
 function stepPhysics() {
   if (paused || speed === 0 || bodies.length === 0) return;
   const total = BASE_DT * speed;
@@ -579,7 +582,6 @@ function drawGlowBody(b) {
 }
 
 function drawBlackHole(b) {
-  function drawBlackHole(b) {
   const TAU = Math.PI * 2;
   const r = b.r;
 
