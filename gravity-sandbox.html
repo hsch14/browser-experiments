@@ -193,7 +193,7 @@ window.addEventListener("resize", resize);
 resize();
 
 // ---------- Physics constants ----------
-const G = 1.5;              // gravitational constant (tuned for pixels)
+let G = 1.5;              // gravitational constant (tuned for pixels)
 const SOFTEN = 4;           // softening length² added to avoid singularities
 const BASE_DT = 0.85;       // simulation time advanced per frame at 1×
 const MAX_STEP = 0.55;      // largest stable sub-step
