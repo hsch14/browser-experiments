@@ -138,6 +138,30 @@
     <span class="dot" style="background:radial-gradient(circle at 35% 32%, #a9d8ff, #3f7be0 60%, #244f9e)"></span>
     <span class="meta"><span class="name">Planet</span><span class="desc">Medium mass</span></span>
   </div>
+  <!-- Custom planet types -->
+<div class="bodybtn" data-type="earth">
+  <span class="dot" style="background:radial-gradient(circle at 35% 32%, #83d3ff, #4196ff 55%, #14418c)"></span>
+  <span class="meta">
+    <span class="name">Earth</span>
+    <span class="desc">Blue terrestrial planet</span>
+  </span>
+</div>
+
+<div class="bodybtn" data-type="mars">
+  <span class="dot" style="background:radial-gradient(circle at 35% 32%, #ffbb89, #eb6941 55%, #6e231e)"></span>
+  <span class="meta">
+    <span class="name">Mars</span>
+    <span class="desc">Red rocky planet</span>
+  </span>
+</div>
+
+<div class="bodybtn" data-type="jupiter">
+  <span class="dot" style="background:radial-gradient(circle at 35% 32%, #f5dab3, #d3a471 55%, #825537)"></span>
+  <span class="meta">
+    <span class="name">Jupiter</span>
+    <span class="desc">Massive gas giant</span>
+  </span>
+</div>
   <div class="bodybtn" data-type="moon">
     <span class="dot" style="background:radial-gradient(circle at 35% 32%, #e6e9f2, #a7adc0 60%, #6b7189)"></span>
     <span class="meta"><span class="name">Moon</span><span class="desc">Light · tiny</span></span>
@@ -224,6 +248,26 @@ const TYPES = {
   planet:    { mass: 75,   palette: [[255,110,80],[220,65,55],[130, 25, 40]],  glow: 1.8, name: "planet" },
   moon:      { mass: 9,    palette: [[230,233,242],[167,173,192],[107,113,137]],glow: 1.0, name: "moon" },
   blackhole: { mass: 7000, palette: [[200, 100, 255], [100, 30, 180], [10, 4, 24]],glow: 5.0, name: "blackhole" },
+    earth: {
+    mass: 40,
+    palette: [[65, 150, 255], [30, 105, 210], [20, 65, 140]],
+    glow: 1.6,
+    name: "earth"
+  },
+
+  mars: {
+    mass: 25,
+    palette: [[235, 105, 65], [185, 65, 45], [110, 35, 30]],
+    glow: 1.2,
+    name: "mars"
+  },
+
+  jupiter: {
+    mass: 115,
+    palette: [[225, 185, 135], [180, 125, 85], [130, 85, 55]],
+    glow: 1.8,
+    name: "jupiter"
+  },
 };
 function radiusForMass(m) { return Math.max(2.2, Math.cbrt(m) * 2.25); }
 
