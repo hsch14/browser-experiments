@@ -438,7 +438,6 @@ if (particles.length > 600) {
 } // merge 함수 종료
 
 function stepPhysics() {
-function stepPhysics() {
   if (paused || speed === 0 || bodies.length === 0) return;
   const total = BASE_DT * speed;
   let sub = Math.ceil(total / MAX_STEP);
