@@ -878,19 +878,47 @@ function balancePresetMomentum() {
 }
 
 // Preset 1: Stylized Solar System
+// Preset 1: Solar System with custom planets
 function loadSolarPreset() {
   resetPresetScene();
 
+  // Create the Sun
   const sun = createPresetBody(
-    "star", W / 2, H / 2, 0, 0,
-    520, [255, 210, 95]
+    "star",
+    W / 2, H / 2,
+    0, 0,
+    520,
+    [255, 210, 95]
   );
 
-  addPresetOrbit(sun, 100, 0.3, 10, [120, 185, 255]);
-  addPresetOrbit(sun, 165, 2.3, 15, [235, 115, 95]);
-  addPresetOrbit(sun, 250, 4.1, 25, [240, 200, 130]);
-  addPresetOrbit(sun, 350, 5.5, 35, [125, 225, 240]);
+  // Create an orbiting planet using its registered type
+  function addNamedPlanet(type, distance, angle) {
+    const def = TYPES[type];
 
+    const planet = addPresetOrbit(
+      sun,
+      distance,
+      angle,
+      def.mass,
+      def.palette[0]
+    );
+
+    planet.type = type;
+    planet.glow = def.glow;
+
+    return planet;
+  }
+
+  // Earth: blue
+  addNamedPlanet("earth", 160, 0.3);
+
+  // Mars: red
+  addNamedPlanet("mars", 245, 2.3);
+
+  // Jupiter: large, brown
+  addNamedPlanet("jupiter", 390, 4.1);
+
+  // Keep the total momentum balanced
   balancePresetMomentum();
 }
 
